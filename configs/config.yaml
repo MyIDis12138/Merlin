@@ -1,0 +1,38 @@
+# logging config
+version: 1
+disable_existing_loggers: False
+formatters:
+  simple:
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: INFO
+    formatter: simple
+    stream: ext://sys.stdout
+  file:
+    class: logging.FileHandler
+    level: DEBUG
+    formatter: simple
+    filename: training.log
+loggers:
+  minidl:
+    level: DEBUG
+    handlers: [console, file]
+    propagate: no
+root:
+  level: WARNING
+  handlers: [console]
+
+
+# model config
+model:
+  name: BMRI_baseline
+  hidden_size: 128
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  epochs: 100
+data:
+  train_path: data/processed/train.csv
+  val_path: data/processed/val.csv

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minidl"
+version = "0.1.0"
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.flake8]
+ignore = ["W503"]

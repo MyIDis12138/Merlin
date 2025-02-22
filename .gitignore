@@ -1,0 +1,54 @@
+# General Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+.env
+venv/
+.ipynb_checkpoints/
+
+# PyTorch Specific
+*.pt
+*.pth
+*.pkl
+*.joblib # Sometimes used for model saving
+data/  # VERY IMPORTANT: Likely where your datasets will be.
+models/ # A good idea, to ignore storing the whole model in git.
+runs/   # TensorBoard logs (if you're using it).
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+
+# IDE/Editor Specific
+.vscode/  # VS Code settings
+.idea/   # JetBrains IDEs (PyCharm, etc.)
+
+# Temporary Files
+*.tmp
+*.bak
+*.swp
+*~
+
+# Logs
+*.log
+
+# dotenv
+.env
+
+# Configuration Files (Keep if you want to version them)
+# config.yaml  # Uncomment if you *don't* want to track configuration.
+# config.json  # Uncomment if you *don't* want to track configuration.
+
+# Data Files (General - adjust as needed)
+*.csv
+*.tsv
+*.txt
+*.zip
+*.tar.gz
+*.h5
+*.hdf5

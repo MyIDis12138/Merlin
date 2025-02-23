@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minidl"
+version = "0.1.0"
+description = "A minimal deep learning library"
+authors = [
+    { name = "Yang Gu", email = "ygu367@gatech.edu" }
+]
+classifiers = [  # See https://pypi.org/classifiers/
+    "Programming Language :: Python :: 3.10",
+    "Intended Audience :: Developers",
+]
+dependencies = [
+    "torch==2.2.2",
+    "torchvision==0.17.2",
+]
+
+
+[project.optional-dependencies]
+dev = [
+    "flake8>=7.0.0",
+    "black>=25.1.0",
+    "isort>=6.0.0",
+    "pre-commit>=4.0.0",
+    "mypy>=1.15.0",
+    "flake8-pyproject>=1.2.0"
+]
+test = [
+    "pytest>=7.0"
+]
+
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+
+[tool.flake8]
+max-line-length = 120
+exclude = [".git", "__pycache__", ".venv", "build", "dist", ".mypy_cache", "notebooks"]
+ignore = ["W503"]
+
+
+[tool.black]
+line-length = 120
+target-version = ['py310']
+
+
+[tool.isort]
+profile = "black"
+line_length = 120
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+combine_as_imports = true

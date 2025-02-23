@@ -17,28 +17,14 @@ def main():
     )
     parser.add_argument("--model_name", type=str, help="Override the model name.")
 
-    parser.add_argument(
-        "--hidden_size", type=int, help="Override the model hidden size."
-    )
-    parser.add_argument(
-        "--batch_size", type=int, help="Override the training batch size."
-    )
-    parser.add_argument(
-        "--learning_rate", type=float, help="Override the learning rate."
-    )
-    parser.add_argument(
-        "--epochs", type=int, help="Override the number of training epochs."
-    )
+    parser.add_argument("--hidden_size", type=int, help="Override the model hidden size.")
+    parser.add_argument("--batch_size", type=int, help="Override the training batch size.")
+    parser.add_argument("--learning_rate", type=float, help="Override the learning rate.")
+    parser.add_argument("--epochs", type=int, help="Override the number of training epochs.")
 
-    parser.add_argument(
-        "--train_path", type=str, help="Override the training data path."
-    )
-    parser.add_argument(
-        "--val_path", type=str, help="Override the validation data path."
-    )
-    parser.add_argument(
-        "--output_dir", type=str, default="output", help="Path to save the outputs"
-    )
+    parser.add_argument("--train_path", type=str, help="Override the training data path.")
+    parser.add_argument("--val_path", type=str, help="Override the validation data path.")
+    parser.add_argument("--output_dir", type=str, default="output", help="Path to save the outputs")
 
     parser.add_argument(
         "--log_level",
@@ -55,11 +41,7 @@ def main():
 
     if args.log_level:
         log_level = args.log_level.upper()
-    elif (
-        "logging" in config
-        and "root" in config["logging"]
-        and "level" in config["logging"]["root"]
-    ):
+    elif "logging" in config and "root" in config["logging"] and "level" in config["logging"]["root"]:
         log_level = config["logging"]["root"]["level"]
     else:
         log_level = "INFO"

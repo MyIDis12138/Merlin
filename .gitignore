@@ -40,10 +40,6 @@ runs/   # TensorBoard logs (if you're using it).
 # dotenv
 .env
 
-# Configuration Files (Keep if you want to version them)
-# config.yaml  # Uncomment if you *don't* want to track configuration.
-# config.json  # Uncomment if you *don't* want to track configuration.
-
 # Data Files (General - adjust as needed)
 *.csv
 *.tsv

@@ -15,7 +15,8 @@ repos:
           - flake8-bugbear        # Adds extra checks, including some good for PyTorch
           - flake8-comprehensions # Checks for better list/dict/set comprehensions
           - pycodestyle>=2.11.1
-          - flake8-typing-imports
+          - flake8-typing-imports==v1.16.0
+          - flake8-pyproject
 
   - repo: https://github.com/pycqa/isort
     rev: 6.0.0

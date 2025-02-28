@@ -1,43 +1,67 @@
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional, Type
+
+from torch.utils.data import Dataset
 
 from ..transforms.mri_transforms import BaseTransform, CropOrPad, MRITransformPipeline, Normalize, RandomFlip, ToTensor
-from .breast_mri_dataset import BreastMRIDataset
 
 
-class DatasetBuilder:
-    """A builder class for constructing dataset instances from configuration.
+class DatasetRegistry:
+    """Registry for dataset classes."""
 
-    This builder supports creating instances of BreastMRIDataset with specified
-    configurations for both the dataset and its transformation pipeline.
+    _datasets: Dict[str, Type[Dataset]] = {}
 
-    Example Config:
-        data:
-          dataset:
-            name: "BreastMRIDataset"
-            params:
-              root_dir: "data/raw/breast_mri"
-              clinical_data_path: "data/raw/Clinical_and_Other_Features.xlsx"
-              clinical_features_columns:
-                - ["Demographics", "Date of Birth (Days)", "(Taking date of diagnosis as day 0)"]
-              train_indices: [0, 1, 2, 3, 4, 5, 6, 7]
-              val_indices: [8, 9]
-              test_indices: [10, 11]
+    @classmethod
+    def register(cls, name: str) -> Callable:
+        """Register a dataset class.
 
-            transforms:
-              train:  # Transforms for training set
-                - name: "Normalize"
-                  params:
-                    range_min: -1.0
-                    range_max: 1.0
-              val:  # Transforms for validation set
-                - name: "Normalize"
-                  params:
-                    range_min: -1.0
-                    range_max: 1.0
-    """
+        Args:
+            name: Name of the dataset
 
-    @staticmethod
-    def build_transforms(transform_configs: Optional[list] = None) -> Optional[MRITransformPipeline]:
+        Returns:
+            Decorator function for registration
+        """
+
+        def decorator(dataset_cls: Type[Dataset]) -> Type[Dataset]:
+            cls._datasets[name] = dataset_cls
+            return dataset_cls
+
+        return decorator
+
+    @classmethod
+    def get(cls, name: str) -> Type[Dataset]:
+        """Get a dataset class by name.
+
+        Args:
+            name: Name of the dataset
+
+        Returns:
+            Dataset class
+
+        Raises:
+            ValueError: If dataset name is not registered
+        """
+        if name not in cls._datasets:
+            raise ValueError(f"Dataset '{name}' not found. Available datasets: {list(cls._datasets.keys())}")
+        return cls._datasets[name]
+
+
+class TransformBuilder:
+    """Builder for transform pipelines."""
+
+    _transform_registry = {"Normalize": Normalize, "CropOrPad": CropOrPad, "RandomFlip": RandomFlip, "ToTensor": ToTensor}
+
+    @classmethod
+    def register_transform(cls, name: str, transform_cls: Type[BaseTransform]) -> None:
+        """Register a new transform.
+
+        Args:
+            name: Name of the transform
+            transform_cls: Transform class to register
+        """
+        cls._transform_registry[name] = transform_cls
+
+    @classmethod
+    def build_transforms(cls, transform_configs: Optional[list] = None) -> Optional[MRITransformPipeline]:
         """Build transformation pipeline from configs.
 
         Args:
@@ -45,6 +69,9 @@ class DatasetBuilder:
 
         Returns:
             MRITransformPipeline if transforms are specified, None otherwise
+
+        Raises:
+            ValueError: If transform name is not registered
         """
         if not transform_configs:
             return None
@@ -54,24 +81,37 @@ class DatasetBuilder:
             transform_name = config["name"]
             params = config.get("params", {})
 
-            transform: BaseTransform
-            if transform_name == "Normalize":
-                transform = Normalize(**params)
-            elif transform_name == "CropOrPad":
-                transform = CropOrPad(**params)
-            elif transform_name == "RandomFlip":
-                transform = RandomFlip(**params)
-            elif transform_name == "ToTensor":
-                transform = ToTensor()
-            else:
-                raise ValueError(f"Unknown transform: {transform_name}")
+            if transform_name not in cls._transform_registry:
+                raise ValueError(f"Unknown transform: {transform_name}. " f"Available transforms: {list(cls._transform_registry.keys())}")
 
+            transform_cls = cls._transform_registry[transform_name]
+            transform = transform_cls(**params) if params else transform_cls()
             transforms.append(transform)
 
         return MRITransformPipeline(transforms)
 
-    @staticmethod
-    def build_dataset(config: Dict[str, Any], split: Literal["train", "val", "test"]) -> BreastMRIDataset:
+
+class DatasetBuilder:
+    """A builder class for constructing dataset instances from configuration.
+
+    This builder supports creating instances of any registered dataset with specified
+    configurations for both the dataset and its transformation pipeline.
+
+    Example Config:
+        data:
+          dataset:
+            name: "BreastMRIDataset"  # Name of the registered dataset
+            params:  # Dataset-specific parameters
+              root_dir: "data/raw/breast_mri"
+              clinical_data_path: "data/raw/Clinical_and_Other_Features.xlsx"
+            transforms:  # Optional transforms for each split
+              train: [...]
+              val: [...]
+              test: [...]
+    """
+
+    @classmethod
+    def build_dataset(cls, config: Dict[str, Any], split: Literal["train", "val", "test"]) -> Dataset:
         """Build dataset instance from config for a specific split.
 
         Args:
@@ -82,8 +122,8 @@ class DatasetBuilder:
             Configured dataset instance
 
         Raises:
-            ValueError: If dataset name is not supported or config is invalid
             KeyError: If required configuration is missing
+            ValueError: If dataset name is not registered
         """
         try:
             dataset_config = config["data"]["dataset"]
@@ -91,29 +131,30 @@ class DatasetBuilder:
             raise KeyError("Configuration must contain 'data.dataset' section")
 
         dataset_name = dataset_config.get("name")
-        if dataset_name != "BreastMRIDataset":
-            raise ValueError(f"Unsupported dataset: {dataset_name}")
+        if not dataset_name:
+            raise ValueError("Dataset name must be specified in config")
+
+        # Get dataset class from registry
+        dataset_cls = DatasetRegistry.get(dataset_name)
 
         # Get dataset parameters
-        params = dataset_config.get("params", {}).copy()  # Make a copy to modify
+        params = dataset_config.get("params", {}).copy()
 
-        # Get indices for the specified split and set as patient_indices
+        # Get indices for the specified split if available
         indices_key = f"{split}_indices"
-        if indices_key in params:
-            patient_indices = params.pop(indices_key)
-            params["patient_indices"] = patient_indices
+        if indices_key in dataset_config:
+            params["indices"] = dataset_config[indices_key]
 
-        # Remove other split indices to avoid unexpected argument errors
-        for other_split in ["train", "val", "test"]:
-            other_key = f"{other_split}_indices"
-            if other_key in params:
-                params.pop(other_key)
-
-        # Build transform pipeline for the specified split
+        # Build transform pipeline for the specified split if available
         transform_configs = dataset_config.get("transforms", {}).get(split)
-        transform = DatasetBuilder.build_transforms(transform_configs)
+        transform = TransformBuilder.build_transforms(transform_configs)
+        if transform:
+            params["transform"] = transform
 
         # Create dataset instance
-        dataset = BreastMRIDataset(transform=transform, **params)
+        try:
+            dataset = dataset_cls(**params)
+        except Exception as e:
+            raise RuntimeError(f"Failed to create dataset '{dataset_name}': {str(e)}")
 
         return dataset

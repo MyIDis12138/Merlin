@@ -1,95 +1,19 @@
-# logging config
-version: 1
-disable_existing_loggers: False
-formatters:
-  simple:
-    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-handlers:
-  console:
-    class: logging.StreamHandler
-    level: INFO
-    formatter: simple
-    stream: ext://sys.stdout
-  file:
-    class: logging.FileHandler
-    level: INFO
-    formatter: simple
-    filename: logs/training_%(asctime)s.log
-    filename_time_format: "%Y%m%d_%H%M%S"
-loggers:
-  minidl:
-    level: INFO
-    handlers: [console, file]
-    propagate: no
-root:
-  level: WARNING
-  handlers: [console]
+imports:
+  - logging.yaml
+  - model.yaml
+  - training.yaml
+  - dataset.yaml
 
+# You can override specific settings here if needed
+environment:
+  seed: 42
+  device: "cuda"
+  num_workers: 4
+  pin_memory: true
 
-# model config
-model:
-  name: BMRI_baseline
-  hidden_size: 128
-
-# training config
-training:
-  batch_size: 32
-  learning_rate: 0.001
-  epochs: 100
-
-# data config
-data:
-  dataset:
-    name: "BreastMRIDataset"
-    params:
-      root_dir: "data/Duke-Breast-Cancer-MRI"
-      clinical_data_path: "data/Clinical_and_Other_Features.xlsx"
-      clinical_features_columns:
-        - ['MRI Technical Information', 'Columns', '320=0,448=1,512=2']
-        - ['Tumor Characteristics', 'Staging(Metastasis)#(Mx -replaced by -1)[M]', '']
-        - ['MRI Findings', 'Lymphadenopathy or Suspicious Nodes', '{0 = no, 1 = yes}']
-      # Optional: specify which patients to use for different splits
-      train_indices: [358]
-      val_indices: [358]
-      test_indices: [358]
-
-    transforms:
-      train:  # Transforms for training set
-        - name: "Normalize"
-          params:
-            range_min: -1.0
-            range_max: 1.0
-            percentiles: [1, 99]
-        - name: "CropOrPad"
-          params:
-            target_size: [5, 32, 256, 256]  # [T, D, H, W]
-            pad_value: 0
-        - name: "RandomFlip"
-          params:
-            flip_prob: 0.5
-            dims: [1, 2]
-        - name: "ToTensor"
-
-      val:  # Transforms for validation set
-        - name: "Normalize"
-          params:
-            range_min: -1.0
-            range_max: 1.0
-            percentiles: [1, 99]
-        - name: "CropOrPad"
-          params:
-            target_size: [5, 32, 256, 256]  # [T, D, H, W]
-            pad_value: 0
-        - name: "ToTensor"
-
-      test:  # Transforms for test set
-        - name: "Normalize"
-          params:
-            range_min: -1.0
-            range_max: 1.0
-            percentiles: [1, 99]
-        - name: "CropOrPad"
-          params:
-            target_size: [5, 32, 256, 256]  # [T, D, H, W]
-            pad_value: 0
-        - name: "ToTensor"
+experiment:
+  name: "breast_mri_classification"
+  tags:
+    - "baseline"
+    - "molecular_subtype"
+  description: "Baseline model for breast MRI molecular subtype classification"

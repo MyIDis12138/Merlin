@@ -1,4 +1,3 @@
-# src/run.py
 import argparse
 import logging.config
 import os

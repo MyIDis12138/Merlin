@@ -2,7 +2,7 @@ import glob
 import logging
 import os
 import re
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -10,24 +10,7 @@ import pydicom
 import torch
 from torch.utils.data import Dataset
 
-# Get the project logger
-logger = logging.getLogger("minidl")
-
-# Define the mapping for molecular subtypes
-MOL_SUBTYPE_MAPPING = {
-    "0": "luminal-like",
-    "0.0": "luminal-like",
-    0: "luminal-like",
-    "1": "ER/PR pos, HER2 pos",
-    "1.0": "ER/PR pos, HER2 pos",
-    1: "ER/PR pos, HER2 pos",
-    "2": "her2",
-    "2.0": "her2",
-    2: "her2",
-    "3": "trip neg",
-    "3.0": "trip neg",
-    3: "trip neg",
-}
+logger = logging.getLogger(__name__)
 
 
 class BreastMRIDataset(Dataset):
@@ -90,7 +73,12 @@ class BreastMRIDataset(Dataset):
     def __init__(
         self,
         root_dir: str,
-        clinical_data_path: Optional[str] = None,
+        clinical_data_path: str,
+        clinical_label: Tuple[str, str, str] = (
+            "Tumor Characteristics",
+            "Mol Subtype",
+            "{0 = luminal-like,\n1 = ER/PR pos, HER2 pos,\n2 = her2,\n3 = trip neg}",
+        ),
         clinical_features_columns: Optional[List[Tuple[str, str, str]]] = None,
         transform=None,
         patient_indices: Optional[List[int]] = None,
@@ -101,31 +89,30 @@ class BreastMRIDataset(Dataset):
             clinical_data_path (str): Path to Clinical_and_Other_Features.xlsx file
             clinical_features_columns (List[Tuple[str, str, str]]): List of clinical features to extract.
                 Each tuple should contain (category, feature_name, description) matching the Excel file's
-                multi-level column headers. For example:
-                [
-                    ('Demographics', 'Date of Birth (Days)', '(Taking date of diagnosis as day 0)'),
-                    ('Demographics', 'Menopause (at diagnosis)', '{0 = pre, 1 = post, 2 = N/A}'),
-                ]
+                multi-level column headers.  See class docstring for an example.
+            clinical_label (List[Tuple[str, str, str]]):  Clinical label to use for molecular subtype.
+                Default: ('Tumor Characteristics', 'Mol Subtype', '{0 = luminal-like,\n1 = ER/PR pos, HER2 pos,\n2 = her2,\n3 = trip neg}')
             transform (callable): Transform pipeline for all image preprocessing
             patient_indices (list): List of Breast_MRI_XXX indices to load
         """
         self.root_dir = root_dir
         self.transform = transform
-        self.clinical_features_columns = clinical_features_columns or []
+        self.clinical_label = clinical_label  # Now expects a list of tuples
+        self.clinical_features_columns = [tuple(col) for col in clinical_features_columns] if clinical_features_columns else []
+
+        self.clinical_ID_col = ("Patient Information", "Patient ID", "")
 
         # Load clinical data if provided
         self.clinical_data = None
         if clinical_data_path is not None:
             try:
-                # Read Excel file with single-level headers
-                self.clinical_data = pd.read_excel(clinical_data_path)
+                # Read Excel file with multi-level headers
+                self.clinical_data = pd.read_excel(clinical_data_path, header=[0, 1, 2])
+                self.clinical_data.columns = [col[:-1] + ("",) if "Unnamed" in col[-1] else col for col in self.clinical_data.columns]
                 logger.info(f"Successfully loaded clinical data from {clinical_data_path}")
 
-                # Debug information
                 logger.debug(f"Clinical data shape: {self.clinical_data.shape}")
-                logger.debug(f"Clinical data columns: {self.clinical_data.columns.tolist()}")
-                logger.debug(f"First row of clinical data:\n{self.clinical_data.iloc[0]}")
-                logger.debug(f"Patient IDs in clinical data:\n{self.clinical_data['Patient_ID'].tolist()}")
+                logger.debug(f"Patient IDs in clinical data:\n{self.clinical_data[self.clinical_ID_col].tolist()}")
 
             except Exception as e:
                 logger.warning(f"Failed to load clinical data: {e}")
@@ -203,40 +190,58 @@ class BreastMRIDataset(Dataset):
     def __len__(self):
         return len(self.patient_data)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Dict:
         """
-        Load 5 dynamic sequences for a single patient
+        Load 5 dynamic sequences for a single patient.
 
         Returns:
-            dict: {
-                'images': tensor of shape [5, H, W, D],  # 3D images at 5 time points
-                'patient_id': str,  # Patient ID
-                'molecular_subtype': str,  # Molecular subtype if clinical data is available
-                'clinical_features': dict  # Additional clinical features if available
-            }
+        -------
+        dict: {
+            'images': tensor of shape [5, D, H, W],  # 3D images at 5 time points
+            'patient_id': str,  # Patient ID
+            'molecular_subtype': str,  # Molecular subtype if clinical data is available
+            'clinical_features': dict  # Additional clinical features if available
+        }
         """
         patient_series = self.patient_data[idx]
 
         # Get patient ID and parent directory
         patient_dir = os.path.dirname(patient_series[0])
-        parent_dir = os.path.dirname(patient_dir)  # Get the parent directory path
-        patient_id = os.path.basename(parent_dir)  # This is Breast_MRI_XXX format
+        patient_id = os.path.basename(os.path.dirname(patient_dir))
 
         # Debug information
-        logger.debug(f"Patient directory path: {patient_dir}")
-        logger.debug(f"Parent directory path: {parent_dir}")
         logger.debug(f"Patient ID: {patient_id}")
 
         # Load DICOM images for 5 dynamic sequences
         series_images = []
         for series_path in patient_series:
-            # Load all DICOM files in the sequence
+            # Load all DICOM files in the sequence, handling potential errors
             dicom_files = sorted(glob.glob(os.path.join(series_path, "*.dcm")))
+            if not dicom_files:
+                logger.warning(f"No DICOM files found in {series_path}. Skipping this sequence.")
+                continue  # Skip this sequence if no DICOM files found
 
-            # Read DICOM files and stack into 3D image
-            slices = [pydicom.dcmread(dcm_path).pixel_array.astype(np.float32) for dcm_path in dicom_files]
+            slices = []
+            for dcm_path in dicom_files:
+                try:
+                    dicom_data = pydicom.dcmread(dcm_path)
+                    slices.append(dicom_data.pixel_array.astype(np.float32))
+                except pydicom.errors.InvalidDicomError as e:
+                    logger.error(f"Error reading DICOM file {dcm_path}: {e}")
+                    # Depending on the situation, you might want to:
+                    # 1.  Skip the file: continue
+                    # 2.  Skip the entire series:  break
+                    # 3.  Raise the exception if it's critical: raise
+                    continue  # Skip this problematic file.
+
+            if not slices:  # Check if any valid slices were read
+                logger.warning(f"No valid slices read from {series_path}. Skipping this sequence.")
+                continue
             volume = np.stack(slices, axis=0)
             series_images.append(volume)
+
+        if not series_images:
+            raise RuntimeError(f"No valid DICOM images loaded for patient {patient_id} at index {idx}.")
 
         # Stack all sequences together
         images = np.stack(series_images, axis=0)
@@ -253,64 +258,25 @@ class BreastMRIDataset(Dataset):
         # Add clinical data if available
         if self.clinical_data is not None:
             try:
-                # Debug information
                 logger.debug(f"Looking for patient {patient_id} in clinical data")
-                logger.debug(f"Clinical data columns: {self.clinical_data.columns.tolist()}")
-                logger.debug(f"Clinical data head:\n{self.clinical_data.head()}")
 
-                # Use the patient_id (Breast_MRI_XXX format) to match with clinical data
-                patient_data = self.clinical_data[self.clinical_data["Patient_ID"] == patient_id]
+                # Get molecular subtype, TODO: handle missing values and type conversion
+                result["molecular_subtype"] = self.clinical_data[self.clinical_data[self.clinical_ID_col] == patient_id][self.clinical_label].values[
+                    0
+                ]
 
-                logger.debug(f"Found {len(patient_data)} matching records for patient {patient_id}")
-
-                if len(patient_data) > 0:
-                    patient_data = patient_data.iloc[0]
-                    logger.debug(f"Patient data: {patient_data.to_dict()}")
-
-                    # Get molecular subtype
-                    mol_subtype = patient_data["Mol_Subtype"]
-                    if pd.isna(mol_subtype):
-                        logger.warning(f"Molecular subtype is NA for patient {patient_id}")
-                        result["molecular_subtype"] = "unknown"
+                # Get other clinical features, if requested, TODO: handle missing values and type conversion
+                if self.clinical_features_columns:
+                    clinical_features_df = self.clinical_data[self.clinical_data[self.clinical_ID_col] == patient_id][self.clinical_features_columns]
+                    if clinical_features_df is not None:
+                        # Convert DataFrame to a dictionary, handling MultiIndex
+                        result["clinical_features"] = clinical_features_df.to_dict(orient="records")[0]
                     else:
-                        result["molecular_subtype"] = MOL_SUBTYPE_MAPPING.get(mol_subtype, "unknown")
-
-                    logger.debug(f"Molecular subtype: {result['molecular_subtype']}")
-
-                    # Add specified clinical features
-                    clinical_features = {}
-                    if self.clinical_features_columns:
-                        column_mapping = {
-                            ("Demographics", "Date of Birth (Days)"): "Date_of_Birth",
-                            ("Demographics", "Menopause (at diagnosis)"): "Menopause",
-                            ("Demographics", "Race and Ethnicity"): "Race_and_Ethnicity",
-                            ("Tumor Characteristics", "Nottingham grade"): "Nottingham_grade",
-                            ("Recurrence", "Recurrence event(s)"): "Recurrence_events",
-                        }
-
-                        # Process each requested clinical feature
-                        for category, feature, _ in self.clinical_features_columns:
-                            feature_key = f"{category}_{feature}"
-                            try:
-                                # Find the corresponding column name
-                                column = column_mapping.get((category, feature))
-                                if column is None:
-                                    logger.warning(f"No mapping found for clinical feature ({category}, {feature})")
-                                    clinical_features[feature_key] = None
-                                else:
-                                    value = patient_data[column]
-                                    clinical_features[feature_key] = None if pd.isna(value) else value
-                            except Exception as e:
-                                logger.warning(f"Failed to get clinical feature ({category}, {feature}): {e}")
-                                clinical_features[feature_key] = None
-
-                    result["clinical_features"] = clinical_features
+                        logger.warning(f"No clinical features found for patient {patient_id}")
                 else:
-                    logger.warning(f"No clinical data found for patient {patient_id}")
+                    logger.debug("No clinical features columns requested.")
 
             except Exception as e:
-                logger.warning(f"Failed to load clinical data for patient {patient_id}: {e}")
+                logger.exception(f"Failed to load clinical data for patient {patient_id}: {e}")
                 logger.debug(f"Clinical data columns: {self.clinical_data.columns.tolist()}")
-                logger.debug(f"Patient directory: {patient_id}")
-
         return result

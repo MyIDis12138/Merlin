@@ -1,7 +1,4 @@
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
-
-if TYPE_CHECKING:
-    from typing import Literal
+from typing import Any, Dict, List, Literal, Optional
 
 from ..transforms.mri_transforms import BaseTransform, CropOrPad, MRITransformPipeline, Normalize, RandomFlip, ToTensor
 from .breast_mri_dataset import BreastMRIDataset

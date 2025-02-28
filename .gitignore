@@ -26,8 +26,8 @@ runs/
 
 
 # IDE/Editor Specific
-.vscode/  # VS Code settings
-.idea/   # JetBrains IDEs (PyCharm, etc.)
+.vscode/
+.idea/
 
 # Temporary Files
 *.tmp

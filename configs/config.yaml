@@ -1,0 +1,96 @@
+# logging config
+version: 1
+disable_existing_loggers: False
+formatters:
+  simple:
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: INFO
+    formatter: simple
+    stream: ext://sys.stdout
+  file:
+    class: logging.FileHandler
+    level: INFO
+    formatter: simple
+    filename: logs/training_%(asctime)s.log
+    filename_time_format: "%Y%m%d_%H%M%S"
+loggers:
+  minidl:
+    level: INFO
+    handlers: [console, file]
+    propagate: no
+root:
+  level: WARNING
+  handlers: [console]
+
+
+# model config
+model:
+  name: BMRI_baseline
+  hidden_size: 128
+
+# training config
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  epochs: 100
+
+# data config
+data:
+  dataset:
+    name: "BreastMRIDataset"
+    params:
+      root_dir: "data/Duke-Breast-Cancer-MRI"
+      clinical_data_path: "data/Clinical_and_Other_Features.xlsx"
+      clinical_features_columns:
+        - ["Demographics", "Date of Birth (Days)", "(Taking date of diagnosis as day 0)"]
+        - ["Demographics", "Menopause (at diagnosis)", "{0 = pre, 1 = post, 2 = N/A}"]
+        - ["Demographics", "Race and Ethnicity", "{0 = N/A, 1 = white, 2 = black, 3 = asian}"]
+        - ["Tumor Characteristics", "Nottingham grade", "1=low 2=intermediate 3=high"]
+      # Optional: specify which patients to use for different splits
+      train_indices: [358]
+      val_indices: [358]
+      test_indices: [358]
+
+    transforms:
+      train:  # Transforms for training set
+        - name: "Normalize"
+          params:
+            range_min: -1.0
+            range_max: 1.0
+            percentiles: [1, 99]
+        - name: "CropOrPad"
+          params:
+            target_size: [5, 32, 256, 256]  # [T, D, H, W]
+            pad_value: 0
+        - name: "RandomFlip"
+          params:
+            flip_prob: 0.5
+            dims: [1, 2]
+        - name: "ToTensor"
+
+      val:  # Transforms for validation set
+        - name: "Normalize"
+          params:
+            range_min: -1.0
+            range_max: 1.0
+            percentiles: [1, 99]
+        - name: "CropOrPad"
+          params:
+            target_size: [5, 32, 256, 256]  # [T, D, H, W]
+            pad_value: 0
+        - name: "ToTensor"
+
+      test:  # Transforms for test set
+        - name: "Normalize"
+          params:
+            range_min: -1.0
+            range_max: 1.0
+            percentiles: [1, 99]
+        - name: "CropOrPad"
+          params:
+            target_size: [5, 32, 256, 256]  # [T, D, H, W]
+            pad_value: 0
+        - name: "ToTensor"

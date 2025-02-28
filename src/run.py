@@ -103,6 +103,7 @@ def main():
         logger.error(f"Failed to build datasets: {e}")
         raise
 
+    print(datasets["train"][0])
     logger.info("Training complete.")
 
 

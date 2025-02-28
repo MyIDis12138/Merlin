@@ -11,5 +11,6 @@ pre-commit run --all-files
 ### dependencies installation
 
 ```
-pip install -e .[dev] --index-url https://download.pytorch.org/whl/cu121
+pip install -e . --index-url https://download.pytorch.org/whl/cu121
+pip install -e .[dev]
 ```

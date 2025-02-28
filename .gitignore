@@ -10,15 +10,16 @@ build/
 .env
 venv/
 .ipynb_checkpoints/
+.mypy_cache/
 
 # PyTorch Specific
 *.pt
 *.pth
 *.pkl
-*.joblib # Sometimes used for model saving
-data/  # VERY IMPORTANT: Likely where your datasets will be.
-models/ # A good idea, to ignore storing the whole model in git.
-runs/   # TensorBoard logs (if you're using it).
+*.joblib
+data/
+models/
+runs/
 
 # Jupyter Notebook
 .ipynb_checkpoints/

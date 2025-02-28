@@ -14,8 +14,12 @@ classifiers = [  # See https://pypi.org/classifiers/
     "Intended Audience :: Developers",
 ]
 dependencies = [
+    "numpy==1.26.4",
     "torch==2.2.2",
     "torchvision==0.17.2",
+    "pydicom>=3.0.0",
+    "pandas>=2.2.0",
+    "openpyxl>=3.1.2",
 ]
 
 
@@ -26,10 +30,17 @@ dev = [
     "isort>=6.0.0",
     "pre-commit>=4.0.0",
     "mypy>=1.15.0",
-    "flake8-pyproject>=1.2.0"
+    "flake8-pyproject>=1.2.0",
 ]
 test = [
-    "pytest>=7.0"
+    "pytest>=7.0",
+]
+notebook = [
+    "ipykernel",
+    "matplotlib",
+    "pandas",
+    "openpyxl",
+    "seaborn",
 ]
 
 
@@ -38,19 +49,19 @@ where = ["src"]
 
 
 [tool.flake8]
-max-line-length = 120
+max-line-length = 150
 exclude = [".git", "__pycache__", ".venv", "build", "dist", ".mypy_cache", "notebooks"]
-ignore = ["W503"]
+ignore = ["W503", "TYP001"]
 
 
 [tool.black]
-line-length = 120
+line-length = 150
 target-version = ['py310']
 
 
 [tool.isort]
 profile = "black"
-line_length = 120
+line_length = 150
 multi_line_output = 3
 include_trailing_comma = true
 force_grid_wrap = 0

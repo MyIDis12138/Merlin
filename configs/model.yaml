@@ -5,7 +5,7 @@ hidden_size: 128
 architecture:
   type: "3D-CNN"
   input_channels: 1
-  output_classes: 4  # Number of molecular subtypes
+  output_classes: 4
   layers:
     - type: "conv3d"
       filters: 32

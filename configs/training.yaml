@@ -20,7 +20,7 @@ scheduler:
 loss:
   type: "cross_entropy"
   params:
-    weight: null  # Can be set for class imbalance
+    weight: null
 
 metrics:
   - accuracy

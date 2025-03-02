@@ -22,14 +22,6 @@ data:
             range_min: -1.0
             range_max: 1.0
             percentiles: [1, 99]
-        - name: "CropOrPad"
-          params:
-            target_size: [5, 32, 256, 256]  # [T, D, H, W]
-            pad_value: 0
-        - name: "RandomFlip"
-          params:
-            flip_prob: 0.5
-            dims: [1, 2]
         - name: "ToTensor"
 
       val:  # Transforms for validation set
@@ -38,10 +30,6 @@ data:
             range_min: -1.0
             range_max: 1.0
             percentiles: [1, 99]
-        - name: "CropOrPad"
-          params:
-            target_size: [5, 32, 256, 256]  # [T, D, H, W]
-            pad_value: 0
         - name: "ToTensor"
 
       test:  # Transforms for test set
@@ -50,8 +38,4 @@ data:
             range_min: -1.0
             range_max: 1.0
             percentiles: [1, 99]
-        - name: "CropOrPad"
-          params:
-            target_size: [5, 32, 256, 256]  # [T, D, H, W]
-            pad_value: 0
         - name: "ToTensor"

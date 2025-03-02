@@ -124,7 +124,8 @@ def main():
     try:
         logger.info("Building datasets...")
         datasets = {}
-        for split in ["train", "val", "test"]:
+        # for split in ["train", "val", "test"]:
+        for split in ["train"]:
             datasets[split] = DatasetBuilder.build_dataset(config, split)
             logger.info(f"Successfully built {split} dataset with {len(datasets[split])} samples")
 
@@ -144,6 +145,9 @@ def main():
         logger.error(f"Failed to build datasets: {e}")
         raise
 
+    sample = datasets["train"][0]
+    print(datasets["train"][0])
+    print(sample["images"].shape)
     logger.info("Training complete.")
 
 

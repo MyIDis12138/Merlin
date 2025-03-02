@@ -3,17 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import torch
 
-from .transform_registry import TransformRegistry
-
-
-class BaseTransform:
-    """Base class for all transforms"""
-
-    def __call__(self, x: Dict[str, Any]) -> Dict[str, Any]:
-        raise NotImplementedError("__call__ method must be implemented in subclasses")
-
-    def __repr__(self) -> str:
-        return self.__class__.__name__
+from .transform_registry import BaseTransform, TransformRegistry
 
 
 @TransformRegistry.register("Normalize")

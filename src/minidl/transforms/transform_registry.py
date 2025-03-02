@@ -1,6 +1,14 @@
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, Type
 
-from .mri_transforms import BaseTransform, MRITransformPipeline
+
+class BaseTransform:
+    """Base class for all transforms"""
+
+    def __call__(self, x: Dict[str, Any]) -> Dict[str, Any]:
+        raise NotImplementedError("__call__ method must be implemented in subclasses")
+
+    def __repr__(self) -> str:
+        return self.__class__.__name__
 
 
 class TransformRegistry:
@@ -92,26 +100,6 @@ class TransformBuilder:
         # Create transform instance
         return transform_cls(**transform_args)
 
-    @staticmethod
-    def build_transform_pipeline(transform_configs: Optional[List[Dict[str, Any]]] = None) -> Optional[MRITransformPipeline]:
-        """Build a transform pipeline based on configuration.
-
-        Args:
-            transform_configs: List of transform configurations
-
-        Returns:
-            Transform pipeline instance, or None if no transforms are specified
-        """
-        if not transform_configs:
-            return None
-
-        transforms = []
-        for config in transform_configs:
-            transform = TransformBuilder.build_transform(config)
-            transforms.append(transform)
-
-        return MRITransformPipeline(transforms)
-
     @classmethod
     def register_transform(cls, name: str, transform_cls: Type[BaseTransform]) -> None:
         """Register a new transform.
@@ -121,18 +109,3 @@ class TransformBuilder:
             transform_cls: Transform class to register
         """
         TransformRegistry._transforms[name] = transform_cls
-
-    @classmethod
-    def build_transforms(cls, transform_configs: Optional[list] = None) -> Optional[MRITransformPipeline]:
-        """Build a transform pipeline based on configuration (legacy method).
-
-        Args:
-            transform_configs: List of transform configurations
-
-        Returns:
-            Transform pipeline instance, or None if no transforms are specified
-        """
-        if transform_configs is None or len(transform_configs) == 0:
-            return None
-
-        return cls.build_transform_pipeline(transform_configs)

@@ -2,7 +2,7 @@ from typing import Any, Callable, Dict, Literal, Type
 
 from torch.utils.data import Dataset
 
-from minidl.transforms import TransformBuilder
+from minidl.transforms import build_transform_pipeline
 
 
 class DatasetRegistry:
@@ -102,7 +102,7 @@ class DatasetBuilder:
 
         transform_configs = dataset_config.get("transforms", {}).get(split, {})
         if transform_configs:
-            transform = TransformBuilder.build_transform_pipeline(transform_configs)
+            transform = build_transform_pipeline(transform_configs)
             if transform:
                 dataset_args["transform"] = transform
 

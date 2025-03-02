@@ -37,6 +37,8 @@ runs/
 
 # Logs
 *.log
+output/
+work_dirs/
 
 # dotenv
 .env

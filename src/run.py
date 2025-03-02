@@ -1,10 +1,34 @@
 import argparse
+import logging
 import logging.config
 import os
+from datetime import datetime
 
+import torch
 import yaml
 
-from minidl.dataset.dataset_builder import DatasetBuilder
+from minidl.runner import RunnerBuilder
+
+
+def get_log_level(level_str):
+    """Convert a log level string to the corresponding logging level.
+
+    Args:
+        level_str: Log level string (e.g., 'INFO', 'DEBUG')
+
+    Returns:
+        int: Corresponding logging level
+    """
+    level_str = level_str.upper()
+    level_map = {
+        "CRITICAL": logging.CRITICAL,
+        "ERROR": logging.ERROR,
+        "WARNING": logging.WARNING,
+        "INFO": logging.INFO,
+        "DEBUG": logging.DEBUG,
+        "NOTSET": logging.NOTSET,
+    }
+    return level_map.get(level_str, logging.INFO)
 
 
 def deep_merge(dict1, dict2):
@@ -35,13 +59,11 @@ def load_config(config_path):
             try:
                 with open(import_path, "r") as f:
                     imported_config = yaml.safe_load(f) or {}
-                    # Deep merge imported config with main config
                     config = deep_merge(config, imported_config)
             except FileNotFoundError:
                 print(f"Warning: Could not find config file {import_path}")
                 continue
 
-        # Remove imports key after processing
         del config["imports"]
 
     return config
@@ -69,86 +91,139 @@ def main():
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Set the logging level (overrides config).",
     )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Device to run on (e.g., 'cuda:0', 'cpu')",
+    )
+    parser.add_argument(
+        "--runner",
+        type=str,
+        default=None,
+        help="Runner type to use (overrides config)",
+    )
+    parser.add_argument(
+        "--work_dir",
+        type=str,
+        default=None,
+        help="Output directory (overrides config)",
+    )
 
     args = parser.parse_args()
 
     # Load and merge configurations
     config = load_config(args.config)
 
+    # Setup output directory
+    if args.work_dir:
+        work_dir = args.work_dir
+    elif config.get("experiment", {}).get("work_dir"):
+        work_dir = config["experiment"]["work_dir"]
+    else:
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        work_dir = os.path.join(project_root, "output", args.experiment_id)
+
+    os.makedirs(work_dir, exist_ok=True)
+
+    config["work_dir"] = work_dir
+
     # Configure logging
+    logs_dir = os.path.join(work_dir, "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+
+    logging_section = config.get("logging", {})
+
     if args.log_level:
         log_level = args.log_level.upper()
-    elif "root" in config and "level" in config["root"]:
-        log_level = config["root"]["level"]
+    elif logging_section.get("root", {}).get("level"):
+        log_level = logging_section["root"]["level"]
     else:
         log_level = "INFO"
 
-    # Create logs directory if it doesn't exist
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    logs_dir = os.path.join(project_root, "logs")
-    os.makedirs(logs_dir, exist_ok=True)
+    log_level_int = get_log_level(log_level)
 
-    # Check if we have all required logging configuration keys
-    has_logging_config = all(key in config for key in ["version", "formatters", "handlers", "loggers", "root"])
+    has_logging_config = all(key in logging_section for key in ["version", "formatters", "handlers"])
 
     if has_logging_config:
         # Create a copy of the logging config
         logging_config = {
-            "version": config["version"],
-            "disable_existing_loggers": config.get("disable_existing_loggers", False),
-            "formatters": config["formatters"],
-            "handlers": config["handlers"],
-            "loggers": config["loggers"],
-            "root": config["root"],
+            "version": logging_section["version"],
+            "disable_existing_loggers": logging_section.get("disable_existing_loggers", False),
+            "formatters": logging_section["formatters"],
+            "handlers": logging_section["handlers"].copy(),
+            "loggers": logging_section.get("loggers", {}),
+            "root": logging_section.get("root", {"level": log_level, "handlers": ["console"]}),
         }
 
-        # Add timestamp to log filename
-        from datetime import datetime
-
+        # Add timestamp to log filename if file handler exists
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        logging_config["handlers"]["file"]["filename"] = os.path.join(logs_dir, f"{args.experiment_id}_{timestamp}.log")
+        if "file" in logging_config["handlers"]:
+            file_handler = logging_config["handlers"]["file"]
+            if "filename" in file_handler:
+                filename = file_handler["filename"]
+                # If it's a relative path, make it relative to logs_dir
+                if not os.path.isabs(filename):
+                    filename = os.path.join(logs_dir, f"{args.experiment_id}_{timestamp}.log")
+                file_handler["filename"] = filename
+
+        # Ensure minidl logger exists
+        if "minidl" not in logging_config.get("loggers", {}):
+            if "loggers" not in logging_config:
+                logging_config["loggers"] = {}
+            logging_config["loggers"]["minidl"] = {"level": log_level, "handlers": list(logging_config["handlers"].keys()), "propagate": False}
 
         logging.config.dictConfig(logging_config)
         logger = logging.getLogger("minidl")
-        logger.setLevel(log_level)
     else:
-        logging.basicConfig(level=log_level)
+        # Basic logging configuration
+        logging.basicConfig(
+            level=log_level_int,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=[
+                logging.StreamHandler(),
+                logging.FileHandler(os.path.join(logs_dir, f"{args.experiment_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")),
+            ],
+        )
         logger = logging.getLogger("minidl")
-        logger.warning("No logging configuration found. Using basicConfig.")
+        logger.warning("No complete logging configuration found. Using basicConfig.")
 
-    # Setup output directory
-    output_dir = os.path.join(project_root, "output", args.experiment_id)
-    os.makedirs(output_dir, exist_ok=True)
+    logger.info(f"Output directory: {work_dir}")
+    logger.info(f"Logs directory: {logs_dir}")
 
-    # Build datasets
+    # Set runner
+    if args.runner:
+        if "runner" not in config:
+            config["runner"] = {}
+        config["runner"]["name"] = args.runner
+
+    if "runner" not in config:
+        config["runner"] = {"name": "epoch_based_runner"}
+    elif "name" not in config["runner"]:
+        config["runner"]["name"] = "epoch_based_runner"
+
+    # Set device
+    device = None
+    if args.device:
+        device = torch.device(args.device)
+    elif config.get("environment", {}).get("device"):
+        device = torch.device(config["environment"]["device"])
+
     try:
-        logger.info("Building datasets...")
-        datasets = {}
-        # for split in ["train", "val", "test"]:
-        for split in ["train"]:
-            datasets[split] = DatasetBuilder.build_dataset(config, split)
-            logger.info(f"Successfully built {split} dataset with {len(datasets[split])} samples")
+        logger.info("Initializing runner...")
 
-            # Log example from each split
-            sample = datasets[split][0]
-            logger.debug(f"\nExample from {split} split:")
-            logger.debug(f"Sample images shape: {sample['images'].shape}")
-            logger.debug(f"Patient ID: {sample['patient_id']}")
-            logger.debug(f"Molecular subtype: {sample['molecular_subtype']}")
-            logger.debug(f"Available clinical features: {list(sample['clinical_features'].keys())}")
+        # Create runner using factory
+        runner = RunnerBuilder.build_runner(config, device)
 
-        # TODO: Add model training code here
-        # model = build_model(config)
-        # train_model(model, datasets['train'], datasets['val'], config)
+        # Run experiment
+        logger.info(f"Starting experiment with runner: {config['runner']['name']}")
+        runner.run()
+
+        logger.info("Experiment completed successfully.")
 
     except Exception as e:
-        logger.error(f"Failed to build datasets: {e}")
+        logger.error(f"Experiment failed: {e}")
         raise
-
-    sample = datasets["train"][0]
-    print(datasets["train"][0])
-    print(sample["images"].shape)
-    logger.info("Training complete.")
 
 
 if __name__ == "__main__":

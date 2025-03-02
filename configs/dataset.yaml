@@ -1,41 +1,55 @@
-data:
-  dataset:
-    name: "BreastMRIDataset"
-    params:
-      root_dir: "data/Duke-Breast-Cancer-MRI"
-      clinical_data_path: "data/Clinical_and_Other_Features.xlsx"
-      clinical_features_columns:
-        - ['MRI Technical Information', 'Columns', '320=0,448=1,512=2']
-        - ['Tumor Characteristics', 'Staging(Metastasis)#(Mx -replaced by -1)[M]', '']
-        - ['MRI Findings', 'Lymphadenopathy or Suspicious Nodes', '{0 = no, 1 = yes}']
+dataset:
+  name: "bmri_dataset"
+  params:
+    root_dir: "data/Duke-Breast-Cancer-MRI"
+    clinical_data_path: "data/Clinical_and_Other_Features.xlsx"
+    clinical_features_columns:
+      - ['MRI Technical Information', 'Columns', '320=0,448=1,512=2']
+      - ['Tumor Characteristics', 'Staging(Metastasis)#(Mx -replaced by -1)[M]', '']
+      - ['MRI Findings', 'Lymphadenopathy or Suspicious Nodes', '{0 = no, 1 = yes}']
 
-    # Optional: specify which patients to use for different splits
-    splits:
-      train_indices: [358]
-      val_indices: [358]
-      test_indices: [358]
+  indices:
+    train: [358]
+    # val: [358]
+    # test: [358]
 
-    transforms:
-      train:  # Transforms for training set
-        - name: "Normalize"
-          params:
-            range_min: -1.0
-            range_max: 1.0
-            percentiles: [1, 99]
-        - name: "ToTensor"
+  transforms:
+    train:  # Transforms for training set
+      - name: "Normalize"
+        range_min: -1.0
+        range_max: 1.0
+        percentiles: [1, 99]
+      - name: "ToTensor"
 
-      val:  # Transforms for validation set
-        - name: "Normalize"
-          params:
-            range_min: -1.0
-            range_max: 1.0
-            percentiles: [1, 99]
-        - name: "ToTensor"
+    val:  # Transforms for validation set
+      - name: "Normalize"
+        range_min: -1.0
+        range_max: 1.0
+        percentiles: [1, 99]
+      - name: "ToTensor"
 
-      test:  # Transforms for test set
-        - name: "Normalize"
-          params:
-            range_min: -1.0
-            range_max: 1.0
-            percentiles: [1, 99]
-        - name: "ToTensor"
+    test:  # Transforms for test set
+      - name: "Normalize"
+        range_min: -1.0
+        range_max: 1.0
+        percentiles: [1, 99]
+      - name: "ToTensor"
+
+dataloader:
+  train:
+    batch_size: 4
+    shuffle: true
+    num_workers: 4
+    pin_memory: true
+
+  val:
+    batch_size: 4
+    shuffle: false
+    num_workers: 4
+    pin_memory: true
+
+  test:
+    batch_size: 4
+    shuffle: false
+    num_workers: 4
+    pin_memory: true

@@ -1,17 +1,5 @@
-name: BMRI_baseline
-hidden_size: 128
-
-# Additional model parameters can be added here
-architecture:
-  type: "3D-CNN"
-  input_channels: 1
-  output_classes: 4
-  layers:
-    - type: "conv3d"
-      filters: 32
-      kernel_size: [3, 3, 3]
-      activation: "relu"
-    - type: "maxpool3d"
-      pool_size: [2, 2, 2]
-    - type: "dropout"
-      rate: 0.25
+model:
+  name: mri_baseline
+  n_classes: 4
+  d_model: 128
+  out_dropout: 0.3

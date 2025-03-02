@@ -10,12 +10,14 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import pydicom
-import torch
 from torch.utils.data import Dataset
+
+from .dataset_registry import DatasetRegistry
 
 logger = logging.getLogger(__name__)
 
 
+@DatasetRegistry.register("bmri_dataset")
 class BreastMRIDataset(Dataset):
     """Breast MRI Dataset Loader
 
@@ -283,17 +285,14 @@ class BreastMRIDataset(Dataset):
         if not series_images:
             raise RuntimeError(f"No valid DICOM images loaded for patient {patient_id}")
 
-        # Stack sequences and apply transforms
         images = np.stack(series_images, axis=0)
-        if self.transform:
-            images = self.transform(images)
-        else:
-            images = torch.from_numpy(images).float()
-
-        # Get clinical features
         clinical_data = self._get_clinical_features(patient_id)
 
-        return {"images": images, "patient_id": patient_id, **clinical_data}
+        data = {"images": images, "patient_id": patient_id, **clinical_data}
+        if self.transform:
+            data = self.transform(data)
+
+        return data
 
     def __len__(self) -> int:
         return len(self.patient_data)

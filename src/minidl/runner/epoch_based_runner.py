@@ -1,6 +1,7 @@
 import functools
 import time
-from typing import Any, Callable, Dict, List, Optional, Protocol, TypeVar, cast
+from collections.abc import Callable
+from typing import Any, TypeVar, cast
 
 import torch
 from tqdm import tqdm
@@ -9,10 +10,6 @@ from .base_runner import BaseRunner
 from .runner_registry import RunnerRegistry
 
 T = TypeVar("T")
-
-
-class PrioritizedHook(Protocol):
-    priority: int
 
 
 def ensure_model_initialized(func: Callable[..., T]) -> Callable[..., T]:
@@ -28,7 +25,7 @@ def ensure_model_initialized(func: Callable[..., T]) -> Callable[..., T]:
                     step_metrics["accuracy"] = torch.tensor(0.0, device=self.device)
                 return step_metrics  # type: ignore
             elif func.__name__.endswith("_epoch"):
-                epoch_metrics: Dict[str, float] = {"loss": float("inf")}
+                epoch_metrics: dict[str, float] = {"loss": float("inf")}
                 if func.__name__ == "val_epoch" or func.__name__ == "test_epoch":
                     epoch_metrics["accuracy"] = 0.0
                 return epoch_metrics  # type: ignore
@@ -46,14 +43,14 @@ class EpochBasedRunner(BaseRunner):
     Attributes:
         max_epochs (int): Maximum number of epochs to train for
         current_epoch (int): Current epoch
-        hooks (List[PrioritizedHook]): List of hooks to call at different stages
+        hooks (list[PrioritizedHook]): list of hooks to call at different stages
         iter (int): Current iteration
-        train_metrics (Dict[str, float]): Training metrics
-        val_metrics (Dict[str, float]): Validation metrics
-        test_metrics (Dict[str, float]): Test metrics
+        train_metrics (dict[str, float]): Training metrics
+        val_metrics (dict[str, float]): Validation metrics
+        test_metrics (dict[str, float]): Test metrics
     """
 
-    def __init__(self, config: Dict[str, Any], device: Optional[torch.device] = None):
+    def __init__(self, config: dict[str, Any], device: torch.device | None = None):
         """Initialize the runner.
 
         Args:
@@ -67,20 +64,10 @@ class EpochBasedRunner(BaseRunner):
         self.current_epoch = 0
         self.iter = 0
 
-        self.hooks: List[PrioritizedHook] = []
-        self.train_metrics: Dict[str, float] = {}
-        self.val_metrics: Dict[str, float] = {}
-        self.test_metrics: Dict[str, float] = {}
+        self.train_metrics: dict[str, float] = {}
+        self.val_metrics: dict[str, float] = {}
+        self.test_metrics: dict[str, float] = {}
         self.best_val_metric: float = float("inf")
-
-    def register_hook(self, hook: PrioritizedHook) -> None:
-        """Register a hook function.
-
-        Args:
-            hook: Hook function to register
-        """
-        self.hooks.append(hook)
-        self.hooks.sort(key=lambda x: x.priority)
 
     def call_hooks(self, stage: str) -> None:
         """Call all registered hooks for a specific stage.
@@ -93,7 +80,7 @@ class EpochBasedRunner(BaseRunner):
                 getattr(hook, stage)(self)
 
     @ensure_model_initialized
-    def train_step(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
+    def train_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
         """Perform a single training step.
 
         Args:
@@ -124,7 +111,7 @@ class EpochBasedRunner(BaseRunner):
         return {"loss": loss}
 
     @ensure_model_initialized
-    def val_step(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
+    def val_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
         """Perform a single validation step.
 
         Args:
@@ -155,7 +142,7 @@ class EpochBasedRunner(BaseRunner):
 
         return {"loss": loss, "accuracy": torch.tensor(accuracy, device=self.device)}
 
-    def test_step(self, batch: Dict[str, Any]) -> Dict[str, torch.Tensor]:
+    def test_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
         """Perform a single test step.
 
         Args:
@@ -167,7 +154,7 @@ class EpochBasedRunner(BaseRunner):
         return self.val_step(batch)
 
     @ensure_model_initialized
-    def train_epoch(self) -> Dict[str, float]:
+    def train_epoch(self) -> dict[str, float]:
         """Train for one epoch.
 
         Returns:
@@ -176,7 +163,7 @@ class EpochBasedRunner(BaseRunner):
         model = cast(torch.nn.Module, self.model)
         model.train()
 
-        epoch_metrics: Dict[str, float] = {}
+        epoch_metrics: dict[str, float] = {}
         self.call_hooks("before_train_epoch")
 
         if self.train_dataloader is None:
@@ -207,7 +194,7 @@ class EpochBasedRunner(BaseRunner):
         return epoch_metrics
 
     @ensure_model_initialized
-    def val_epoch(self) -> Dict[str, float]:
+    def val_epoch(self) -> dict[str, float]:
         """Validate for one epoch.
 
         Returns:
@@ -216,7 +203,7 @@ class EpochBasedRunner(BaseRunner):
         model = cast(torch.nn.Module, self.model)
         model.eval()
 
-        epoch_metrics: Dict[str, float] = {}
+        epoch_metrics: dict[str, float] = {}
         self.call_hooks("before_val_epoch")
 
         if self.val_dataloader is None:
@@ -246,7 +233,7 @@ class EpochBasedRunner(BaseRunner):
         return epoch_metrics
 
     @ensure_model_initialized
-    def test_epoch(self) -> Dict[str, float]:
+    def test_epoch(self) -> dict[str, float]:
         """Test for one epoch.
 
         Returns:
@@ -255,7 +242,7 @@ class EpochBasedRunner(BaseRunner):
         model = cast(torch.nn.Module, self.model)
         model.eval()
 
-        epoch_metrics: Dict[str, float] = {}
+        epoch_metrics: dict[str, float] = {}
         self.call_hooks("before_test_epoch")
 
         if self.test_dataloader is None:
@@ -317,7 +304,7 @@ class EpochBasedRunner(BaseRunner):
         end_time = time.time()
         self.logger.info(f"Training completed in {end_time - start_time:.2f} seconds")
 
-    def validate(self) -> Dict[str, float]:
+    def validate(self) -> dict[str, float]:
         """Validate the model.
 
         Returns:
@@ -332,7 +319,7 @@ class EpochBasedRunner(BaseRunner):
 
         return val_metrics
 
-    def test(self) -> Dict[str, float]:
+    def test(self) -> dict[str, float]:
         """Test the model.
 
         Returns:

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import torch
@@ -16,12 +16,12 @@ class Normalize(BaseTransform):
         percentiles (Tuple[float, float], optional): Percentiles for computing normalization range
     """
 
-    def __init__(self, range_min: float = -1.0, range_max: float = 1.0, percentiles: Optional[Tuple[float, float]] = None):
+    def __init__(self, range_min: float = -1.0, range_max: float = 1.0, percentiles: tuple[float, float] | None = None):
         self.range_min = range_min
         self.range_max = range_max
         self.percentiles = percentiles
 
-    def __call__(self, x: Dict[str, Any]) -> Dict[str, Any]:
+    def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
         images = x["images"]
         if isinstance(images, torch.Tensor):
             images = images.float()
@@ -59,7 +59,7 @@ class Normalize(BaseTransform):
 class ToTensor(BaseTransform):
     """Convert numpy array to PyTorch tensor"""
 
-    def __call__(self, x: Dict[str, Any]) -> Dict[str, Any]:
+    def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
         images = x["images"]
         if isinstance(images, np.ndarray):
             # Create a contiguous copy of the array to avoid negative stride issues
@@ -75,7 +75,7 @@ class MRITransformPipeline:
     """Pipeline for MRI image transformations
 
     Args:
-        transforms (List[BaseTransform]): List of transforms to apply
+        transforms (list[BaseTransform]): list of transforms to apply
 
     Example:
         >>> transform = MRITransformPipeline([
@@ -86,10 +86,10 @@ class MRITransformPipeline:
         ... ])
     """
 
-    def __init__(self, transforms: List[BaseTransform]):
+    def __init__(self, transforms: list[BaseTransform]):
         self.transforms = transforms
 
-    def __call__(self, x: Dict[str, Any]) -> Dict[str, Any]:
+    def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
         for t in self.transforms:
             x = t(x)
         return x

@@ -1,8 +1,9 @@
 import os
-from typing import Any, Callable, Dict, List, Optional, Type
+from collections.abc import Callable
+from typing import Any
 
 import torch
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard.writer import SummaryWriter
 
 
 class HookRegistry:
@@ -12,7 +13,7 @@ class HookRegistry:
     and retrieved by name.
     """
 
-    _hooks: Dict[str, Type["Hook"]] = {}
+    _hooks: dict[str, type["Hook"]] = {}
 
     @classmethod
     def register(cls, name: str) -> Callable:
@@ -25,14 +26,14 @@ class HookRegistry:
             Decorator function for registration
         """
 
-        def decorator(hook_cls: Type["Hook"]) -> Type["Hook"]:
+        def decorator(hook_cls: type["Hook"]) -> type["Hook"]:
             cls._hooks[name] = hook_cls
             return hook_cls
 
         return decorator
 
     @classmethod
-    def get(cls, name: str) -> Type["Hook"]:
+    def get(cls, name: str) -> type["Hook"]:
         """Get a hook class by name.
 
         Args:
@@ -50,7 +51,7 @@ class HookRegistry:
         return cls._hooks[name]
 
     @classmethod
-    def available_hooks(cls) -> Dict[str, Type["Hook"]]:
+    def available_hooks(cls) -> dict[str, type["Hook"]]:
         """Get all available hooks.
 
         Returns:
@@ -145,7 +146,7 @@ class Hook:
 class TensorboardLoggerHook(Hook):
     """Hook for logging to TensorBoard."""
 
-    def __init__(self, log_dir: Optional[str] = None, interval: int = 10, priority: int = 50):
+    def __init__(self, log_dir: str | None = None, interval: int = 10, priority: int = 50):
         """Initialize the hook.
 
         Args:
@@ -174,25 +175,25 @@ class TensorboardLoggerHook(Hook):
         # Log learning rate
         if runner.optimizer is not None:
             for i, param_group in enumerate(runner.optimizer.param_groups):
-                self.writer.add_scalar(f"train/lr_{i}", param_group["lr"], runner.iter)
+                self.writer.add_scalar(f"train/lr_{i}", param_group["lr"], runner.iter)  # type: ignore
 
     def after_train_epoch(self, runner):
         """Log training metrics to TensorBoard."""
         # Log training metrics
         for k, v in runner.train_metrics.items():
-            self.writer.add_scalar(f"train/{k}", v, runner.current_epoch)
+            self.writer.add_scalar(f"train/{k}", v, runner.current_epoch)  # type: ignore
 
     def after_val_epoch(self, runner):
         """Log validation metrics to TensorBoard."""
         # Log validation metrics
         for k, v in runner.val_metrics.items():
-            self.writer.add_scalar(f"val/{k}", v, runner.current_epoch)
+            self.writer.add_scalar(f"val/{k}", v, runner.current_epoch)  # type: ignore
 
     def after_test_epoch(self, runner):
         """Log test metrics to TensorBoard."""
         # Log test metrics
         for k, v in runner.test_metrics.items():
-            self.writer.add_scalar(f"test/{k}", v, runner.current_epoch)
+            self.writer.add_scalar(f"test/{k}", v, runner.current_epoch)  # type: ignore
 
     def after_train(self, runner):
         """Close TensorBoard writer."""
@@ -209,7 +210,7 @@ class CheckpointHook(Hook):
         interval: int = 1,
         save_optimizer: bool = True,
         save_scheduler: bool = True,
-        out_dir: Optional[str] = None,
+        out_dir: str | None = None,
         max_keep_ckpts: int = 5,
         save_best: bool = True,
         rule: str = "less",
@@ -240,7 +241,7 @@ class CheckpointHook(Hook):
         self.best_metric_name = best_metric_name
 
         self.best_metric = float("inf") if rule == "less" else -float("inf")
-        self.saved_ckpts: List[str] = []
+        self.saved_ckpts: list[str] = []
 
     def before_train(self, runner):
         """Initialize checkpoint directory."""
@@ -255,7 +256,7 @@ class CheckpointHook(Hook):
             return
 
         # Save checkpoint
-        ckpt_path = os.path.join(self.out_dir, f"epoch_{runner.current_epoch + 1}.pth")
+        ckpt_path = os.path.join(self.out_dir, f"epoch_{runner.current_epoch + 1}.pth")  # type: ignore
         self._save_checkpoint(runner, ckpt_path)
         self.saved_ckpts.append(ckpt_path)
 
@@ -285,7 +286,7 @@ class CheckpointHook(Hook):
 
         if is_better:
             self.best_metric = current_metric
-            ckpt_path = os.path.join(self.out_dir, "best_model.pth")
+            ckpt_path = os.path.join(self.out_dir, "best_model.pth")  # type: ignore
             self._save_checkpoint(runner, ckpt_path)
             runner.logger.info(f"Saved best model with {self.best_metric_name} = {self.best_metric:.4f}")
 
@@ -367,7 +368,7 @@ class HookBuilder:
     """
 
     @staticmethod
-    def build_hook(hook_config: Dict[str, Any], work_dir: Optional[str] = None) -> Hook:
+    def build_hook(hook_config: dict[str, Any], work_dir: str | None = None) -> Hook:
         """Build a hook instance based on configuration.
 
         Args:
@@ -402,15 +403,15 @@ class HookBuilder:
         return hook_cls(**hook_params)
 
     @staticmethod
-    def build_hooks(hooks_config: Optional[List[Dict[str, Any]]] = None, work_dir: Optional[str] = None) -> List[Hook]:
+    def build_hooks(hooks_config: list[dict[str, Any]] | None = None, work_dir: str | None = None) -> list[Hook]:
         """Build multiple hook instances based on configuration.
 
         Args:
-            hooks_config: List of hook configurations
+            hooks_config: list of hook configurations
             work_dir: Working directory for the runner
 
         Returns:
-            List of hook instances
+            list of hook instances
 
         Raises:
             ValueError: If any hook name is not specified or not registered

@@ -3,9 +3,10 @@ import logging
 import os
 import re
 import warnings
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Hashable
 
 import numpy as np
 import pandas as pd
@@ -54,12 +55,12 @@ class BreastMRIDataset(Dataset):
         - 'images': Tensor of shape [5, D, H, W] representing 3D images at 5 timepoints
         - 'patient_id': Patient identifier
         - 'molecular_subtype': Molecular subtype (if clinical data is provided)
-        - 'clinical_features': Dictionary of additional clinical features (if specified)
+        - 'clinical_features': dictionary of additional clinical features (if specified)
 
     Args:
         root_dir (str): Root directory path containing the dataset
         clinical_data_path (str, optional): Path to Clinical_and_Other_Features.xlsx file
-        clinical_features_columns (List[Tuple[str, str, str]], optional): List of clinical features to extract.
+        clinical_features_columns (list[tuple[str, str, str]], optional): list of clinical features to extract.
             Each tuple should contain (category, feature_name, description) matching the Excel file's
             multi-level column headers. For example:
             [
@@ -67,7 +68,7 @@ class BreastMRIDataset(Dataset):
                 ('Demographics', 'Menopause (at diagnosis)', '{0 = pre, 1 = post, 2 = N/A}'),
             ]
         transform (callable, optional): Transform pipeline for image preprocessing
-        patient_indices (List[int], optional): List of Breast_MRI_XXX indices to load
+        patient_indices (list[int], optional): list of Breast_MRI_XXX indices to load
         max_workers (int): Maximum number of worker threads for parallel processing
         cache_size (int): Size of the LRU cache for DICOM reading
 
@@ -80,15 +81,15 @@ class BreastMRIDataset(Dataset):
     def __init__(
         self,
         root_dir: str,
-        clinical_data_path: Optional[str] = None,
-        clinical_label: Tuple[str, str, str] = (
+        clinical_data_path: str | None = None,
+        clinical_label: tuple[str, str, str] = (
             "Tumor Characteristics",
             "Mol Subtype",
             "{0 = luminal-like,\n1 = ER/PR pos, HER2 pos,\n2 = her2,\n3 = trip neg}",
         ),
-        clinical_features_columns: Optional[List[Tuple[str, str, str]]] = None,
-        transform: Optional[Callable] = None,
-        patient_indices: Optional[List[int]] = None,
+        clinical_features_columns: list[tuple[str, str, str]] | None = None,
+        transform: Callable | None = None,
+        patient_indices: list[int] | None = None,
         max_workers: int = 4,
     ):
         self.root_dir = root_dir
@@ -104,19 +105,19 @@ class BreastMRIDataset(Dataset):
         self._initialize_clinical_data(clinical_data_path)
         self._initialize_patient_data(patient_indices)
 
-    def _initialize_clinical_data(self, clinical_data_path: Optional[str]) -> None:
+    def _initialize_clinical_data(self, clinical_data_path: str | None) -> None:
         """Initialize clinical data from Excel file."""
         self.clinical_data = None
         if clinical_data_path is not None:
             try:
                 self.clinical_data = pd.read_excel(clinical_data_path, header=[0, 1, 2])
-                self.clinical_data.columns = [col[:-1] + ("",) if "Unnamed" in col[-1] else col for col in self.clinical_data.columns]
+                self.clinical_data.columns = [col[:-1] + "" if "Unnamed" in col[-1] else col for col in self.clinical_data.columns]
                 logger.info(f"Successfully loaded clinical data from {clinical_data_path}")
             except Exception as e:
                 logger.warning(f"Failed to load clinical data: {e}")
                 self.clinical_data = None
 
-    def _initialize_patient_data(self, patient_indices: Optional[List[int]]) -> None:
+    def _initialize_patient_data(self, patient_indices: list[int] | None) -> None:
         """Initialize patient directories and validate data."""
         # Find and validate directories
         all_mri_dirs = self._get_valid_mri_dirs(patient_indices)
@@ -132,7 +133,7 @@ class BreastMRIDataset(Dataset):
         # Initialize patient data
         self.patient_data = self._initialize_dynamic_sequences()
 
-    def _get_valid_mri_dirs(self, patient_indices: Optional[List[int]]) -> List[str]:
+    def _get_valid_mri_dirs(self, patient_indices: list[int] | None) -> list[str]:
         """
         Get valid MRI directories based on the specified patient indices.
 
@@ -140,7 +141,7 @@ class BreastMRIDataset(Dataset):
             patient_indices: Optional list of patient indices to filter directories
 
         Returns:
-            List of valid MRI directory paths
+            list of valid MRI directory paths
         """
         # Find all directories matching Breast_MRI_XXX pattern
         all_mri_dirs = glob.glob(os.path.join(self.root_dir, "Breast_MRI_*"))
@@ -174,15 +175,15 @@ class BreastMRIDataset(Dataset):
 
         return valid_mri_dirs
 
-    def _get_valid_patient_dirs(self, mri_dirs: List[str]) -> List[str]:
+    def _get_valid_patient_dirs(self, mri_dirs: list[str]) -> list[str]:
         """
         Get valid patient directories from MRI directories.
 
         Args:
-            mri_dirs: List of MRI directory paths
+            mri_dirs: list of MRI directory paths
 
         Returns:
-            List of valid patient directory paths
+            list of valid patient directory paths
         """
         patient_dirs = []
         for mri_dir in mri_dirs:
@@ -200,12 +201,12 @@ class BreastMRIDataset(Dataset):
 
         return sorted(patient_dirs)
 
-    def _initialize_dynamic_sequences(self) -> List[List[str]]:
+    def _initialize_dynamic_sequences(self) -> list[list[str]]:
         """
         Initialize dynamic sequences for all valid patient directories.
 
         Returns:
-            List of lists containing paths to dynamic sequence directories for each patient
+            list of lists containing paths to dynamic sequence directories for each patient
         """
         patient_data = []
 
@@ -225,7 +226,7 @@ class BreastMRIDataset(Dataset):
 
     @staticmethod
     @lru_cache(maxsize=128)
-    def _read_dicom_file(file_path: str) -> np.ndarray:
+    def _read_dicom_file(file_path: str) -> np.ndarray | None:
         """Read a DICOM file and return its pixel array."""
         try:
             with warnings.catch_warnings():
@@ -235,7 +236,7 @@ class BreastMRIDataset(Dataset):
             logger.error(f"Error reading DICOM file {file_path}: {e}")
             return None
 
-    def _load_sequence_images(self, series_path: str) -> Optional[np.ndarray]:
+    def _load_sequence_images(self, series_path: str) -> np.ndarray | None:
         """Load all DICOM images in a sequence directory."""
         dicom_files = sorted(glob.glob(os.path.join(series_path, "*.dcm")))
         if not dicom_files:
@@ -247,7 +248,7 @@ class BreastMRIDataset(Dataset):
 
         return np.stack(slices, axis=0) if slices else None
 
-    def _get_clinical_features(self, patient_id: str) -> Dict[str, Any]:
+    def _get_clinical_features(self, patient_id: str) -> dict[str, Any]:
         """Get clinical features for a patient."""
         if self.clinical_data is None:
             return {"molecular_subtype": None, "clinical_features": {}}
@@ -259,7 +260,7 @@ class BreastMRIDataset(Dataset):
 
             molecular_subtype = patient_data[self.clinical_label].values[0]
 
-            clinical_features: Dict[str, Any] = {}
+            clinical_features: dict[Hashable, Any] = {}
             if self.clinical_features_columns:
                 features_df = patient_data[self.clinical_features_columns]
                 clinical_features = features_df.to_dict(orient="records")[0] if not features_df.empty else {}
@@ -269,7 +270,7 @@ class BreastMRIDataset(Dataset):
             logger.exception(f"Failed to load clinical data for patient {patient_id}: {e}")
             return {"molecular_subtype": None, "clinical_features": {}}
 
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
+    def __getitem__(self, idx: int) -> dict[str, Any]:
         """Get a single patient's data."""
         patient_series = self.patient_data[idx]
         patient_dir = os.path.dirname(patient_series[0])

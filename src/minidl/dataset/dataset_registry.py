@@ -1,4 +1,5 @@
-from typing import Any, Callable, Dict, Literal, Type
+from collections.abc import Callable
+from typing import Any, Literal
 
 from torch.utils.data import Dataset
 
@@ -11,7 +12,7 @@ class DatasetRegistry:
     This class provides a registry for registering and retrieving dataset classes.
     """
 
-    _datasets: Dict[str, Type[Dataset]] = {}
+    _datasets: dict[str, type[Dataset]] = {}
 
     @classmethod
     def register(cls, name: str) -> Callable:
@@ -24,7 +25,7 @@ class DatasetRegistry:
             Decorator function
         """
 
-        def decorator(dataset_cls: Type[Dataset]) -> Type[Dataset]:
+        def decorator(dataset_cls: type[Dataset]) -> type[Dataset]:
             if name in cls._datasets:
                 raise ValueError(f"Dataset '{name}' already registered")
 
@@ -34,7 +35,7 @@ class DatasetRegistry:
         return decorator
 
     @classmethod
-    def get(cls, name: str) -> Type[Dataset]:
+    def get(cls, name: str) -> type[Dataset]:
         """Get a dataset class by name.
 
         Args:
@@ -52,7 +53,7 @@ class DatasetRegistry:
         return cls._datasets[name]
 
     @classmethod
-    def available_datasets(cls) -> Dict[str, Type[Dataset]]:
+    def available_datasets(cls) -> dict[str, type[Dataset]]:
         """Get all available datasets.
 
         Returns:
@@ -68,7 +69,7 @@ class DatasetBuilder:
     """
 
     @staticmethod
-    def build_dataset(config: Dict[str, Any], split: Literal["train", "val", "test"]) -> Dataset:
+    def build_dataset(config: dict[str, Any], split: Literal["train", "val", "test"]) -> Dataset:
         """Build a dataset instance based on configuration.
 
         Args:

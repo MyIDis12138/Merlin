@@ -1,4 +1,5 @@
-from typing import Any, Callable, Dict, Optional, Type
+from collections.abc import Callable
+from typing import Any
 
 import torch
 
@@ -13,7 +14,7 @@ class RunnerRegistry:
     and retrieved by name.
     """
 
-    _runners: Dict[str, Type[BaseRunner]] = {}
+    _runners: dict[str, type[BaseRunner]] = {}
 
     @classmethod
     def register(cls, name: str) -> Callable:
@@ -26,14 +27,14 @@ class RunnerRegistry:
             Decorator function for registration
         """
 
-        def decorator(runner_cls: Type[BaseRunner]) -> Type[BaseRunner]:
+        def decorator(runner_cls: type[BaseRunner]) -> type[BaseRunner]:
             cls._runners[name] = runner_cls
             return runner_cls
 
         return decorator
 
     @classmethod
-    def get(cls, name: str) -> Type[BaseRunner]:
+    def get(cls, name: str) -> type[BaseRunner]:
         """Get a runner class by name.
 
         Args:
@@ -51,7 +52,7 @@ class RunnerRegistry:
         return cls._runners[name]
 
     @classmethod
-    def available_runners(cls) -> Dict[str, Type[BaseRunner]]:
+    def available_runners(cls) -> dict[str, type[BaseRunner]]:
         """Get all available runners.
 
         Returns:
@@ -67,7 +68,7 @@ class RunnerBuilder:
     """
 
     @staticmethod
-    def build_runner(config: Dict[str, Any], device: Optional[torch.device] = None) -> BaseRunner:
+    def build_runner(config: dict[str, Any], device: torch.device | None = None) -> BaseRunner:
         """Build a runner instance based on configuration.
 
         Args:

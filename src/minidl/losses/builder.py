@@ -1,11 +1,11 @@
-from typing import Any, Dict
+from typing import Any
 
 import torch.nn as nn
 
 from .loss_registry import LossRegistry
 
 
-def build_loss(config: Dict[str, Any]) -> nn.Module:
+def build_loss(config: dict[str, Any]) -> nn.Module:
     """Build a loss function from configuration.
 
     Args:

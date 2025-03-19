@@ -1,10 +1,11 @@
-from typing import Any, Callable, Dict, Type
+from collections.abc import Callable
+from typing import Any
 
 
 class BaseTransform:
     """Base class for all transforms"""
 
-    def __call__(self, x: Dict[str, Any]) -> Dict[str, Any]:
+    def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError("__call__ method must be implemented in subclasses")
 
     def __repr__(self) -> str:
@@ -17,7 +18,7 @@ class TransformRegistry:
     This class provides a registry for registering and retrieving transform classes.
     """
 
-    _transforms: Dict[str, Type[BaseTransform]] = {}
+    _transforms: dict[str, type[BaseTransform]] = {}
 
     @classmethod
     def register(cls, name: str) -> Callable:
@@ -30,7 +31,7 @@ class TransformRegistry:
             Decorator function
         """
 
-        def decorator(transform_cls: Type[BaseTransform]) -> Type[BaseTransform]:
+        def decorator(transform_cls: type[BaseTransform]) -> type[BaseTransform]:
             if name in cls._transforms:
                 raise ValueError(f"Transform '{name}' already registered")
 
@@ -40,7 +41,7 @@ class TransformRegistry:
         return decorator
 
     @classmethod
-    def get(cls, name: str) -> Type[BaseTransform]:
+    def get(cls, name: str) -> type[BaseTransform]:
         """Get a transform class by name.
 
         Args:
@@ -58,7 +59,7 @@ class TransformRegistry:
         return cls._transforms[name]
 
     @classmethod
-    def available_transforms(cls) -> Dict[str, Type[BaseTransform]]:
+    def available_transforms(cls) -> dict[str, type[BaseTransform]]:
         """Get all available transforms.
 
         Returns:
@@ -74,7 +75,7 @@ class TransformBuilder:
     """
 
     @staticmethod
-    def build_transform(config: Dict[str, Any]) -> BaseTransform:
+    def build_transform(config: dict[str, Any]) -> BaseTransform:
         """Build a transform instance based on configuration.
 
         Args:
@@ -101,7 +102,7 @@ class TransformBuilder:
         return transform_cls(**transform_args)
 
     @classmethod
-    def register_transform(cls, name: str, transform_cls: Type[BaseTransform]) -> None:
+    def register_transform(cls, name: str, transform_cls: type[BaseTransform]) -> None:
         """Register a new transform.
 
         Args:

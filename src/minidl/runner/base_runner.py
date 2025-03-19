@@ -1,7 +1,8 @@
 import logging
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Optional, TypeVar, cast
+from collections.abc import Callable
+from typing import Any, Protocol, TypeVar, cast
 
 import torch
 from torch.nn import Module
@@ -14,6 +15,10 @@ from minidl.losses import build_loss
 from minidl.model.model_registry import ModelBuilder
 
 T = TypeVar("T")
+
+
+class PrioritizedHook(Protocol):
+    priority: int
 
 
 def ensure_model_exists(func: Callable[..., T]) -> Callable[..., T]:
@@ -38,7 +43,7 @@ class BaseRunner(ABC):
     It handles dataset creation, model initialization, training, validation, and testing.
 
     Attributes:
-        config (Dict[str, Any]): Configuration dictionary for the experiment
+        config (dict[str, Any]): Configuration dictionary for the experiment
         device (torch.device): Device to run the experiment on
         logger (logging.Logger): Logger for the experiment
         model (nn.Module): Model for the experiment
@@ -53,7 +58,7 @@ class BaseRunner(ABC):
         loss_fn (nn.Module): Loss function
     """
 
-    def __init__(self, config: Dict[str, Any], device: Optional[torch.device] = None):
+    def __init__(self, config: dict[str, Any], device: torch.device | None = None):
         """Initialize the runner.
 
         Args:
@@ -65,16 +70,18 @@ class BaseRunner(ABC):
 
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        self.model: Optional[Module] = None
-        self.train_dataset: Optional[Dataset] = None
-        self.val_dataset: Optional[Dataset] = None
-        self.test_dataset: Optional[Dataset] = None
-        self.train_dataloader: Optional[DataLoader] = None
-        self.val_dataloader: Optional[DataLoader] = None
-        self.test_dataloader: Optional[DataLoader] = None
-        self.optimizer: Optional[Optimizer] = None
-        self.scheduler: Optional[_LRScheduler] = None
-        self.loss_fn: Optional[Module] = None
+        self.hooks: list[PrioritizedHook] = []
+
+        self.model: Module | None = None
+        self.train_dataset: Dataset | None = None
+        self.val_dataset: Dataset | None = None
+        self.test_dataset: Dataset | None = None
+        self.train_dataloader: DataLoader | None = None
+        self.val_dataloader: DataLoader | None = None
+        self.test_dataloader: DataLoader | None = None
+        self.optimizer: Optimizer | None = None
+        self.scheduler: _LRScheduler | None = None
+        self.loss_fn: Module | None = None
 
         self.work_dir = self.config.get("work_dir", "work_dirs/default")
         os.makedirs(self.work_dir, exist_ok=True)
@@ -145,8 +152,17 @@ class BaseRunner(ABC):
                 scheduler_args = {k: v for k, v in scheduler_config.items() if k != "name"}
                 self.scheduler = scheduler_cls(self.optimizer, **scheduler_args)
 
+    def register_hook(self, hook: PrioritizedHook) -> None:
+        """Register a hook function.
+
+        Args:
+            hook: Hook function to register
+        """
+        self.hooks.append(hook)
+        self.hooks.sort(key=lambda x: x.priority)
+
     @ensure_model_exists
-    def save_checkpoint(self, filename: str, extra_info: Optional[Dict[str, Any]] = None) -> None:
+    def save_checkpoint(self, filename: str, extra_info: dict[str, Any] | None = None) -> None:
         """Save model checkpoint.
 
         Args:
@@ -175,7 +191,7 @@ class BaseRunner(ABC):
         self.logger.info(f"Checkpoint saved to {checkpoint_path}")
 
     @ensure_model_exists
-    def load_checkpoint(self, filename: str) -> Dict[str, Any]:
+    def load_checkpoint(self, filename: str) -> dict[str, Any]:
         """Load model checkpoint.
 
         Args:
@@ -217,7 +233,7 @@ class BaseRunner(ABC):
         pass
 
     @abstractmethod
-    def validate(self) -> Dict[str, float]:
+    def validate(self) -> dict[str, float]:
         """Validate the model.
 
         Returns:
@@ -226,7 +242,7 @@ class BaseRunner(ABC):
         pass
 
     @abstractmethod
-    def test(self) -> Dict[str, float]:
+    def test(self) -> dict[str, float]:
         """Test the model.
 
         Returns:

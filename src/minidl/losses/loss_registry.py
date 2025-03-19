@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Type
+from collections.abc import Callable
 
 import torch.nn as nn
 
@@ -10,7 +10,7 @@ class LossRegistry:
     and retrieve them by name.
     """
 
-    _registry: Dict[str, Type[nn.Module]] = {}
+    _registry: dict[str, type[nn.Module]] = {}
 
     @classmethod
     def register(cls, name: str) -> Callable:
@@ -23,7 +23,7 @@ class LossRegistry:
             Decorator function
         """
 
-        def _register(loss_class: Type[nn.Module]) -> Type[nn.Module]:
+        def _register(loss_class: type[nn.Module]) -> type[nn.Module]:
             if name in cls._registry:
                 raise ValueError(f"Loss function {name} already registered")
             cls._registry[name] = loss_class
@@ -32,7 +32,7 @@ class LossRegistry:
         return _register
 
     @classmethod
-    def get(cls, name: str) -> Type[nn.Module]:
+    def get(cls, name: str) -> type[nn.Module]:
         """Get a loss function by name.
 
         Args:
@@ -49,7 +49,7 @@ class LossRegistry:
         return cls._registry[name]
 
     @classmethod
-    def available_losses(cls) -> Dict[str, Type[nn.Module]]:
+    def available_losses(cls) -> dict[str, type[nn.Module]]:
         """Get all registered loss functions.
 
         Returns:

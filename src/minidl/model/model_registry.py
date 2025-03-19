@@ -1,4 +1,5 @@
-from typing import Any, Callable, Dict, Type
+from collections.abc import Callable
+from typing import Any
 
 import torch.nn as nn
 
@@ -23,7 +24,7 @@ class ModelRegistry:
             decorator function
         """
 
-        def decorator(model_cls: Type[nn.Module]) -> Type[nn.Module]:
+        def decorator(model_cls: type[nn.Module]) -> type[nn.Module]:
             if name in _MODEL_REGISTRY:
                 raise ValueError(f"model '{name}' already registered")
 
@@ -33,7 +34,7 @@ class ModelRegistry:
         return decorator
 
     @staticmethod
-    def get(name: str) -> Type[nn.Module]:
+    def get(name: str) -> type[nn.Module]:
         """get model class by name
 
         Args:
@@ -51,7 +52,7 @@ class ModelRegistry:
         return _MODEL_REGISTRY[name]
 
     @staticmethod
-    def available_models() -> Dict[str, Type[nn.Module]]:
+    def available_models() -> dict[str, type[nn.Module]]:
         """get all available models
 
         Returns:
@@ -68,7 +69,7 @@ class ModelBuilder:
     """
 
     @staticmethod
-    def build_model(config: Dict[str, Any]) -> nn.Module:
+    def build_model(config: dict[str, Any]) -> nn.Module:
         """build model instance by config
 
         Args:

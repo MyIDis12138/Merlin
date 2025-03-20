@@ -1,7 +1,7 @@
 import functools
 import time
 from collections.abc import Callable
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar
 
 import torch
 from torch.cuda.amp import GradScaler, autocast
@@ -33,6 +33,29 @@ def ensure_model_initialized(func: Callable[..., T]) -> Callable[..., T]:
         return func(self, *args, **kwargs)
 
     return wrapper
+
+
+def compute_gradient_norm(model: torch.nn.Module, norm_type: float = 2.0) -> torch.Tensor:
+    """Compute the norm of gradients for all parameters.
+
+    Args:
+        model: The model containing parameters to compute gradient norms for
+        norm_type: Type of the norm (e.g., 2 for L2 norm)
+
+    Returns:
+        Norm of gradients
+    """
+    parameters = [p for p in model.parameters() if p.grad is not None]
+    if len(parameters) == 0:
+        return torch.tensor(0.0)
+
+    # Calculate norm based on norm_type
+    if norm_type == float("inf"):
+        total_norm = max(p.grad.detach().abs().max() for p in parameters)
+    else:
+        total_norm = torch.norm(torch.stack([torch.norm(p.grad.detach(), norm_type) for p in parameters]), norm_type)
+
+    return total_norm
 
 
 @RunnerRegistry.register("epoch_based_runner")
@@ -70,6 +93,11 @@ class EpochBasedRunner(BaseRunner):
         self.test_metrics: dict[str, float] = {}
         self.best_val_metric: float = float("inf")
 
+        # Initialize gradient norm tracking
+        self.grad_norm = torch.tensor(0.0)
+        self.grad_norm_history: list[float] = []
+        self.train_step_metrics: dict[str, torch.Tensor] = {}
+
     def call_hooks(self, stage: str) -> None:
         """Call all registered hooks for a specific stage.
 
@@ -88,7 +116,7 @@ class EpochBasedRunner(BaseRunner):
             batch: Batch of data
 
         Returns:
-            Dictionary of loss values
+            Dictionary of loss values and metrics
         """
         # TODO:temporary indexing, more general indexing should be used
         inputs = batch["images"].to(self.device)
@@ -108,10 +136,17 @@ class EpochBasedRunner(BaseRunner):
             loss = loss_fn(outputs, targets)
 
         scaler.scale(loss).backward()
+
+        self.grad_norm = compute_gradient_norm(self.model, norm_type=2.0)  # type: ignore
+        self.grad_norm_history.append(float(self.grad_norm))
+
         scaler.step(optimizer)
         scaler.update()
 
-        return {"loss": loss}
+        # Store step metrics for hooks
+        self.train_step_metrics = {"loss": loss, "grad_norm": self.grad_norm}
+
+        return {"loss": loss, "grad_norm": self.grad_norm}
 
     @ensure_model_initialized
     def val_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
@@ -127,8 +162,8 @@ class EpochBasedRunner(BaseRunner):
         inputs = batch["images"].to(self.device)
         targets = batch["molecular_subtype"].to(self.device)
 
-        model = cast(torch.nn.Module, self.model)
-        loss_fn = cast(torch.nn.Module, self.loss_fn)
+        model = self.model
+        loss_fn = self.loss_fn
 
         if loss_fn is None:
             self.logger.error("Cannot perform validation step: loss_fn is None")
@@ -163,7 +198,7 @@ class EpochBasedRunner(BaseRunner):
         Returns:
             Dictionary of training metrics
         """
-        model = cast(torch.nn.Module, self.model)
+        model = self.model
         model.train()
 
         epoch_metrics: dict[str, float] = {}
@@ -203,7 +238,7 @@ class EpochBasedRunner(BaseRunner):
         Returns:
             Dictionary of validation metrics
         """
-        model = cast(torch.nn.Module, self.model)
+        model = self.model
         model.eval()
 
         epoch_metrics: dict[str, float] = {}
@@ -242,7 +277,7 @@ class EpochBasedRunner(BaseRunner):
         Returns:
             Dictionary of test metrics
         """
-        model = cast(torch.nn.Module, self.model)
+        model = self.model
         model.eval()
 
         epoch_metrics: dict[str, float] = {}

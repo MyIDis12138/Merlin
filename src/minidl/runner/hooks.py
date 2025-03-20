@@ -3,6 +3,7 @@ from collections.abc import Callable
 from typing import Any
 
 import torch
+import wandb
 from torch.utils.tensorboard.writer import SummaryWriter
 
 
@@ -306,6 +307,221 @@ class CheckpointHook(Hook):
 
         torch.save(checkpoint, ckpt_path)
         runner.logger.info(f"Checkpoint saved to {ckpt_path}")
+
+
+@HookRegistry.register("wandb_logger_hook")
+class WandbLoggerHook(Hook):
+    """Hook for logging to Weights & Biases (wandb)."""
+
+    def __init__(
+        self,
+        project: str,
+        name: str | None = None,
+        entity: str | None = None,
+        config: dict[str, Any] | None = None,
+        dir: str | None = None,
+        tags: list | None = None,
+        notes: str | None = None,
+        group: str | None = None,
+        job_type: str | None = None,
+        save_code: bool = True,
+        log_artifacts: bool = False,
+        interval: int = 10,
+        priority: int = 50,
+        log_grad_norm: bool = True,
+        grad_norm_window: int = 100,
+    ):
+        """Initialize the wandb logging hook.
+
+        Args:
+            project: Name of the wandb project
+            name: Name of the run (defaults to a randomly generated name if not provided)
+            entity: wandb team/username (defaults to your username if not provided)
+            config: Dictionary of configuration parameters to track
+            dir: Directory to store the run data
+            tags: List of tags for organizing and filtering runs
+            notes: Notes about the run to be stored with it
+            group: Specify a group to organize multiple runs
+            job_type: Specify the type of job (e.g., 'train', 'eval', etc.)
+            save_code: Save a copy of the code that created the run
+            log_artifacts: Whether to log model checkpoints as artifacts
+            interval: Interval (in iterations) to log training metrics
+            priority: Priority of the hook
+            log_grad_norm: Whether to log gradient norms
+            grad_norm_window: Number of recent gradient norms to consider for tracking
+        """
+        super().__init__(priority)
+        self.project = project
+        self.name = name
+        self.entity = entity
+        self.config = config
+        self.dir = dir
+        self.tags = tags
+        self.notes = notes
+        self.group = group
+        self.job_type = job_type
+        self.save_code = save_code
+        self.log_artifacts = log_artifacts
+        self.interval = interval
+        self.run = None
+        self.log_grad_norm = log_grad_norm
+        self.grad_norm_window = grad_norm_window
+        self.recent_grad_norms = []  # type: ignore
+
+    def before_run(self, runner):
+        """Initialize wandb run before the runner starts."""
+        # Update config with runner's config if available
+        if hasattr(runner, "config") and runner.config is not None:
+            if self.config is None:
+                self.config = runner.config
+            else:
+                # Merge configs, prioritizing explicit hook config
+                merged_config = runner.config.copy()
+                merged_config.update(self.config)
+                self.config = merged_config
+
+        # Set up the directory
+        if self.dir is None and hasattr(runner, "work_dir"):
+            self.dir = os.path.join(runner.work_dir, "wandb")
+            os.makedirs(self.dir, exist_ok=True)
+
+        # If name is not specified, generate one based on datetime and config
+        if self.name is None:
+            import hashlib
+            import time
+
+            # Generate a short hash from config
+            config_str = str(sorted(self.config.items())) if self.config else ""
+            config_hash = hashlib.md5(config_str.encode()).hexdigest()[:6]
+            self.name = f"run_{time.strftime('%Y%m%d_%H%M%S')}_{config_hash}"
+
+        # Initialize wandb run
+        self.run = wandb.init(
+            project=self.project,
+            name=self.name,
+            entity=self.entity,
+            config=self.config,
+            dir=self.dir,
+            tags=self.tags,
+            notes=self.notes,
+            group=self.group,
+            job_type=self.job_type,
+            save_code=self.save_code,
+            reinit=True,
+        )
+
+        # Watch the model to track gradients, parameters, etc.
+        if hasattr(runner, "model") and runner.model is not None:
+            try:
+                # Watch model with wandb to track gradients and parameters
+                wandb.watch(
+                    runner.model,
+                    log="all",  # Log gradients and parameters
+                    log_freq=self.interval,  # Log every interval iterations
+                    log_graph=True,  # Log model graph
+                )
+            except Exception as e:
+                if hasattr(runner, "logger"):
+                    runner.logger.warning(f"Failed to watch model with wandb: {e}")
+
+        # Log system info
+        try:
+            import platform
+
+            sys_info = {
+                "python_version": platform.python_version(),
+                "pytorch_version": torch.__version__,
+                "cuda_available": torch.cuda.is_available(),
+            }
+
+            if torch.cuda.is_available():
+                sys_info.update(
+                    {"cuda_version": torch.version.cuda, "gpu_name": torch.cuda.get_device_name(0), "gpu_count": torch.cuda.device_count()}
+                )
+
+            wandb.run.summary.update(sys_info)
+
+            # Create custom charts for gradient tracking
+            if self.log_grad_norm:
+                wandb.define_metric("train/grad_norm", summary="max")
+                wandb.define_metric("train/grad_norm_mean", summary="mean")
+                wandb.define_metric("train/grad_norm_std", summary="std")
+
+        except Exception as e:
+            if hasattr(runner, "logger"):
+                runner.logger.warning(f"Failed to log system info: {e}")
+
+    def after_train_step(self, runner):
+        """Log training metrics to wandb."""
+        # Only log every interval iterations
+        if runner.iter % self.interval != 0:
+            return
+
+        # Prepare metrics dictionary
+        metrics_dict = {}
+
+        # Log learning rate
+        if runner.optimizer is not None:
+            for i, param_group in enumerate(runner.optimizer.param_groups):
+                metrics_dict[f"train/lr_{i}"] = param_group["lr"]
+
+        # Log gradient norm if available
+        if hasattr(runner, "grad_norm"):
+            metrics_dict["train/grad_norm"] = runner.grad_norm.item()
+
+        # Log step metrics if available
+        if hasattr(runner, "train_step_metrics") and runner.train_step_metrics:
+            for k, v in runner.train_step_metrics.items():
+                if k != "grad_norm":  # Already added above
+                    metrics_dict[f"train/step_{k}"] = v.item()
+
+        # Add current batch metrics if available in the tqdm progress bar
+        if hasattr(runner, "train_dataloader") and hasattr(runner.train_dataloader, "postfix"):
+            for k, v in runner.train_dataloader.postfix.items():
+                if isinstance(v, (int, float)) or (isinstance(v, str) and v.replace(".", "", 1).isdigit()):
+                    try:
+                        metrics_dict[f"train/batch_{k}"] = float(v)
+                    except ValueError:
+                        pass
+
+        # Log all metrics
+        if metrics_dict:
+            wandb.log(metrics_dict, step=runner.iter)
+
+    def after_train_epoch(self, runner):
+        """Log training metrics to wandb after each training epoch."""
+        # Log training metrics
+        if hasattr(runner, "train_metrics") and runner.train_metrics:
+            metrics = {f"train/{k}": v for k, v in runner.train_metrics.items()}
+            metrics["epoch"] = runner.current_epoch
+
+            # Add gradient norm histogram if available
+            if hasattr(runner, "grad_norm_history") and runner.grad_norm_history:
+                # Convert to tensor for wandb
+                grad_norm_tensor = torch.tensor(runner.grad_norm_history[-len(runner.train_dataloader) :])
+                metrics["train/grad_norm_hist"] = wandb.Histogram(grad_norm_tensor.numpy())
+
+                # Also log min, max, mean, std of gradient norms for this epoch
+                if len(grad_norm_tensor) > 0:
+                    metrics["train/grad_norm_min"] = grad_norm_tensor.min().item()
+                    metrics["train/grad_norm_max"] = grad_norm_tensor.max().item()
+                    metrics["train/grad_norm_mean"] = grad_norm_tensor.mean().item()
+                    metrics["train/grad_norm_std"] = grad_norm_tensor.std().item()
+
+            wandb.log(metrics, step=runner.iter if hasattr(runner, "iter") else None)
+
+    def after_val_epoch(self, runner):
+        """Log validation metrics to wandb after each validation epoch."""
+        # Log validation metrics
+        if hasattr(runner, "val_metrics") and runner.val_metrics:
+            metrics = {f"val/{k}": v for k, v in runner.val_metrics.items()}
+            metrics["epoch"] = runner.current_epoch
+            wandb.log(metrics, step=runner.iter if hasattr(runner, "iter") else None)
+
+    def after_run(self, runner):
+        """Ensure wandb run is properly closed."""
+        if wandb.run is not None:
+            wandb.finish()
 
 
 @HookRegistry.register("early_stopping_hook")

@@ -18,7 +18,7 @@ class TestMRIBaseline(unittest.TestCase):
         }
         model = ModelBuilder.build_model(config).to("cuda")
         batch_size = 4
-        x = torch.randn(batch_size, 3, 158, 512, 512).to("cuda")
+        x = torch.randn(batch_size, 3, 174, 512, 512).to("cuda")
         y = model(x)
         self.assertEqual(y.shape, (batch_size, 4), "Output shape should be (batch_size, n_classes)")
 

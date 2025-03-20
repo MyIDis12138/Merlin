@@ -15,24 +15,51 @@ dataset:
 
   transforms:
     train:  # Transforms for training set
+      - name: "ResizeXY"
+        target_size: 512
+        mode: "bicubic"
+
+      - name: "ResampleZ"
+        target_slices: 174
+        mode: "linear"
+
       - name: "Normalize"
         range_min: -1.0
         range_max: 1.0
         percentiles: [1, 99]
+
       - name: "ToTensor"
 
     val:  # Transforms for validation set
+      - name: "ResizeXY"
+        target_size: 512
+        mode: "bicubic"
+
+      - name: "ResampleZ"
+        target_slices: 174
+        mode: "linear"
+
       - name: "Normalize"
         range_min: -1.0
         range_max: 1.0
         percentiles: [1, 99]
+
       - name: "ToTensor"
 
     test:  # Transforms for test set
+      - name: "ResizeXY"
+        target_size: 512
+        mode: "bicubic"
+
+      - name: "ResampleZ"
+        target_slices: 174
+        mode: "linear"
+
       - name: "Normalize"
         range_min: -1.0
         range_max: 1.0
         percentiles: [1, 99]
+
       - name: "ToTensor"
 
 dataloader:

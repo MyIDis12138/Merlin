@@ -2,8 +2,222 @@ from typing import Any
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from .transform_registry import BaseTransform, TransformRegistry
+
+
+@TransformRegistry.register("ResizeXY")
+class ResizeXY(BaseTransform):
+    """Resize the X and Y dimensions of all images to target size using bicubic interpolation.
+
+    Works with both numpy arrays and PyTorch tensors.
+
+    Args:
+        target_size (Union[Tuple[int, int], int]): Target size for X and Y dimensions.
+            Can be a tuple (width, height) or a single int for square images.
+        mode (str): Interpolation mode. Default is 'bicubic'.
+            Options for torch: 'nearest', 'linear', 'bilinear', 'bicubic', 'trilinear'
+            Options for numpy: 'nearest', 'linear', 'area', 'cubic'
+    """
+
+    def __init__(self, target_size: tuple[int, int] | int = 512, mode: str = "bicubic"):
+        if isinstance(target_size, int):
+            self.target_size = (target_size, target_size)
+        else:
+            self.target_size = target_size
+        self.mode = mode
+
+    def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
+        images = x["images"]
+
+        if isinstance(images, torch.Tensor):
+            # PyTorch tensor case: (C, Z, X, Y)
+            C, Z, _, _ = images.shape
+
+            # Reshape to merge C and Z dimensions for 2D resizing
+            reshaped = images.reshape(C * Z, 1, images.shape[2], images.shape[3])
+
+            # Resize using F.interpolate (handles batched 2D images)
+            if self.mode == "bicubic":
+                # Using align_corners=False as the default behavior
+                resized = F.interpolate(reshaped, size=self.target_size, mode="bicubic", align_corners=False)
+            else:
+                align_corners = None if self.mode == "nearest" else False
+                resized = F.interpolate(reshaped, size=self.target_size, mode=self.mode, align_corners=align_corners)
+
+            # Reshape back to original format
+            x["images"] = resized.reshape(C, Z, self.target_size[0], self.target_size[1])
+
+        else:
+            # NumPy array case
+            import cv2
+
+            C, Z, _, _ = images.shape
+            resized_images = np.zeros((C, Z, self.target_size[0], self.target_size[1]), dtype=images.dtype)
+
+            # Map PyTorch interpolation modes to OpenCV interpolation flags
+            mode_map = {
+                "nearest": cv2.INTER_NEAREST,
+                "linear": cv2.INTER_LINEAR,
+                "bilinear": cv2.INTER_LINEAR,
+                "bicubic": cv2.INTER_CUBIC,
+                "area": cv2.INTER_AREA,
+            }
+
+            interpolation = mode_map.get(self.mode, cv2.INTER_CUBIC)
+
+            # Resize each slice
+            for c in range(C):
+                for z in range(Z):
+                    resized_images[c, z] = cv2.resize(
+                        images[c, z], (self.target_size[1], self.target_size[0]), interpolation=interpolation  # OpenCV expects (width, height)
+                    )
+
+            x["images"] = resized_images
+
+        return x
+
+    def __repr__(self) -> str:
+        return f"ResizeXY(target_size={self.target_size}, mode='{self.mode}')"
+
+
+@TransformRegistry.register("ResampleZ")
+class ResampleZ(BaseTransform):
+    """Resample the Z-dimension (number of slices) of all volumes to a fixed number.
+
+    Args:
+        target_slices (int): Target number of slices in Z dimension
+        mode (str): Interpolation mode. Default is 'linear'.
+            Options for torch: 'nearest', 'linear', 'bilinear', 'trilinear'
+            Options for numpy: 'nearest', 'linear'
+        center_around_median (bool): If True, centers the resampling around the median slice.
+            If False, resamples the entire volume uniformly. Default is True.
+    """
+
+    def __init__(self, target_slices: int = 174, mode: str = "linear", center_around_median: bool = True):
+        self.target_slices = target_slices
+        self.mode = mode
+        self.center_around_median = center_around_median
+
+    def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
+        images = x["images"]
+
+        if isinstance(images, torch.Tensor):
+            # PyTorch tensor case
+            C, Z, H, W = images.shape
+
+            if Z == self.target_slices:
+                return x  # No resampling needed
+
+            if self.center_around_median and Z > 1:
+                # Find the median slice index
+                median_slice = Z // 2
+
+                # Calculate start and end indices to center around median
+                if self.target_slices >= Z:
+                    # Upsampling: use the full range and interpolate
+                    resampled = self._resample_torch(images, self.target_slices)
+                else:
+                    # Downsampling: take a centered subset and then interpolate if needed
+                    half_target = self.target_slices // 2
+                    start = max(0, median_slice - half_target)
+                    end = min(Z, start + self.target_slices)
+
+                    # Adjust start if end hit the boundary
+                    if end == Z:
+                        start = max(0, Z - self.target_slices)
+
+                    subset = images[:, start:end]
+                    if subset.shape[1] != self.target_slices:
+                        resampled = self._resample_torch(subset, self.target_slices)
+                    else:
+                        resampled = subset
+            else:
+                # Resample the entire Z dimension uniformly
+                resampled = self._resample_torch(images, self.target_slices)
+
+            x["images"] = resampled
+
+        else:
+            # NumPy array case
+            C, Z, H, W = images.shape
+
+            if Z == self.target_slices:
+                return x  # No resampling needed
+
+            if self.center_around_median and Z > 1:
+                # Find the median slice index
+                median_slice = Z // 2
+
+                # Calculate start and end indices to center around median
+                if self.target_slices >= Z:
+                    # Upsampling: use the full range and interpolate
+                    resampled = self._resample_numpy(images, self.target_slices)
+                else:
+                    # Downsampling: take a centered subset and then interpolate if needed
+                    half_target = self.target_slices // 2
+                    start = max(0, median_slice - half_target)
+                    end = min(Z, start + self.target_slices)
+
+                    # Adjust start if end hit the boundary
+                    if end == Z:
+                        start = max(0, Z - self.target_slices)
+
+                    subset = images[:, start:end]
+                    if subset.shape[1] != self.target_slices:
+                        resampled = self._resample_numpy(subset, self.target_slices)
+                    else:
+                        resampled = subset
+            else:
+                # Resample the entire Z dimension uniformly
+                resampled = self._resample_numpy(images, self.target_slices)
+
+            x["images"] = resampled
+
+        return x
+
+    def _resample_torch(self, images: torch.Tensor, target_slices: int) -> torch.Tensor:
+        """Helper method to resample PyTorch tensor in Z dimension."""
+        C, Z, H, W = images.shape
+
+        # Reshape to format expected by F.interpolate: [B, C, D]
+        reshaped = images.reshape(C, Z, H * W).permute(0, 2, 1)
+
+        # Use 1D interpolation for Z dimension
+        if self.mode == "nearest":
+            resampled = F.interpolate(reshaped, size=target_slices, mode="nearest")
+        else:
+            # For 1D interpolation, we use linear (which is 1D)
+            resampled = F.interpolate(reshaped, size=target_slices, mode="linear", align_corners=False)
+
+        # Reshape back to original format: [C, Z, H, W]
+        return resampled.permute(0, 2, 1).reshape(C, target_slices, H, W)
+
+    def _resample_numpy(self, images: np.ndarray, target_slices: int) -> np.ndarray:
+        """Helper method to resample NumPy array in Z dimension."""
+        from scipy.ndimage import zoom
+
+        C, Z, H, W = images.shape
+
+        # Calculate zoom factor for Z dimension
+        z_factor = target_slices / Z
+
+        # Create output array
+        resampled = np.zeros((C, target_slices, H, W), dtype=images.dtype)
+
+        # Apply zoom for each channel
+        for c in range(C):
+            if self.mode == "nearest":
+                resampled[c] = zoom(images[c], (z_factor, 1, 1), order=0)
+            else:
+                # Linear interpolation
+                resampled[c] = zoom(images[c], (z_factor, 1, 1), order=1)
+
+        return resampled
+
+    def __repr__(self) -> str:
+        return f"ResampleZ(target_slices={self.target_slices}, mode='{self.mode}', center_around_median={self.center_around_median})"
 
 
 @TransformRegistry.register("Normalize")

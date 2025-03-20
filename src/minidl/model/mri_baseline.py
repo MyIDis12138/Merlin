@@ -58,7 +58,7 @@ class MRI_baseline(nn.Module):
             DownBlock(d_model // 2, d_model),  # d_model/2 -> d_model
         )
 
-        self.mri_adapters = nn.ModuleList([nn.Sequential(ConvBlock(d_model, d_model), ConvBlock(d_model, d_model)) for _ in range(5)])
+        self.mri_adapters = nn.ModuleList([nn.Sequential(ConvBlock(d_model, d_model), ConvBlock(d_model, d_model)) for _ in range(3)])
 
         self.spatial_attention = nn.Sequential(
             nn.AdaptiveAvgPool3d(1), nn.Conv3d(d_model, d_model // 2, 1), nn.ReLU(inplace=True), nn.Conv3d(d_model // 2, d_model, 1), nn.Sigmoid()
@@ -71,10 +71,10 @@ class MRI_baseline(nn.Module):
         )
 
     def forward(self, x):
-        # x: tensor of 5 MRI images, shaped [B, 5, D, H, W]
+        # x: tensor of 3 MRI images, shaped [B, 3, D, H, W]
         features = []
 
-        for i in range(5):
+        for i in range(3):
             mri = x[:, i, :, :, :].unsqueeze(1)  # [B, 1, D, H, W]
 
             feat = self.shared_extractor(mri)  # [B, d_model, D', H', W']
@@ -95,13 +95,3 @@ class MRI_baseline(nn.Module):
         logits = self.classifier(mean_output)  # [B, n_classes]
 
         return logits
-
-
-if __name__ == "__main__":
-    model = MRI_baseline(4, 32).to("cuda")
-    x = torch.randn(4, 5, 158, 512, 512).to("cuda")
-    y = model(x)
-    print(y.shape)
-
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"Total parameters: {total_params:,}")

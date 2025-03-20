@@ -161,6 +161,16 @@ class BaseRunner(ABC):
         self.hooks.append(hook)
         self.hooks.sort(key=lambda x: x.priority)
 
+    def call_hooks(self, stage: str) -> None:
+        """Call all registered hooks for a specific stage.
+
+        Args:
+            stage: Stage to call hooks for (e.g., 'before_train_epoch', 'after_train_epoch')
+        """
+        for hook in self.hooks:
+            if hasattr(hook, stage):
+                getattr(hook, stage)(self)
+
     @ensure_model_exists
     def save_checkpoint(self, filename: str, extra_info: dict[str, Any] | None = None) -> None:
         """Save model checkpoint.

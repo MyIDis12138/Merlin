@@ -368,7 +368,7 @@ class WandbLoggerHook(Hook):
         self.grad_norm_window = grad_norm_window
         self.recent_grad_norms = []  # type: ignore
 
-    def before_run(self, runner):
+    def before_train(self, runner):
         """Initialize wandb run before the runner starts."""
         # Update config with runner's config if available
         if hasattr(runner, "config") and runner.config is not None:
@@ -518,7 +518,7 @@ class WandbLoggerHook(Hook):
             metrics["epoch"] = runner.current_epoch
             wandb.log(metrics, step=runner.iter if hasattr(runner, "iter") else None)
 
-    def after_run(self, runner):
+    def after_train(self, runner):
         """Ensure wandb run is properly closed."""
         if wandb.run is not None:
             wandb.finish()

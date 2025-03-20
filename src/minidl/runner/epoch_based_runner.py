@@ -98,16 +98,6 @@ class EpochBasedRunner(BaseRunner):
         self.grad_norm_history: list[float] = []
         self.train_step_metrics: dict[str, torch.Tensor] = {}
 
-    def call_hooks(self, stage: str) -> None:
-        """Call all registered hooks for a specific stage.
-
-        Args:
-            stage: Stage to call hooks for (e.g., 'before_train_epoch', 'after_train_epoch')
-        """
-        for hook in self.hooks:
-            if hasattr(hook, stage):
-                getattr(hook, stage)(self)
-
     @ensure_model_initialized
     def train_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
         """Perform a single training step.

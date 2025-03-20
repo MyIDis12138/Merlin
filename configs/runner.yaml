@@ -21,11 +21,11 @@ runner:
         max_keep_ckpts: 5
         save_best: true
 
-    - name: "WandbLoggerHook"
+    - name: "wandb_logger_hook"
       params:
         project: "Multi-modal for MRI"
-        tags: ["CNN_baseline", "molecular_subtype"],
-        interval: 10,
+        tags: ["CNN_baseline", "molecular_subtype"]
+        interval: 10
         log_artifacts: True
 
     - name: "early_stopping_hook"

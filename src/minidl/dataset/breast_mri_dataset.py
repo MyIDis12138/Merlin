@@ -167,7 +167,6 @@ class BreastMRIDataset(Dataset):
         # Sort directories by numerical order
         valid_mri_dirs.sort(key=lambda x: int(os.path.basename(x).split("_")[-1]))
         available_indices = sorted(dir_indices.keys())
-        logger.info(f"Found {len(valid_mri_dirs)} valid Breast_MRI_XXX directories with indices: {available_indices}")
 
         # If patient indices are provided, filter Breast_MRI_XXX directories
         if patient_indices is not None:

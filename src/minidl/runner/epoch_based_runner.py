@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any, TypeVar, cast
 
 import torch
+from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
 
 from .base_runner import BaseRunner
@@ -93,20 +94,22 @@ class EpochBasedRunner(BaseRunner):
         inputs = batch["images"].to(self.device)
         targets = batch["molecular_subtype"].to(self.device)
 
-        model = cast(torch.nn.Module, self.model)
-        loss_fn = cast(torch.nn.Module, self.loss_fn)
-        optimizer = cast(torch.optim.Optimizer, self.optimizer)
+        loss_fn = self.loss_fn
+        optimizer = self.optimizer
 
         if loss_fn is None or optimizer is None:
             self.logger.error("Cannot perform train step: loss_fn or optimizer is None")
             return {"loss": torch.tensor(float("inf"), device=self.device)}
 
-        outputs = model(inputs)
-        loss = loss_fn(outputs, targets)
-
+        scaler = GradScaler()
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        with autocast():
+            outputs = self.model(inputs)  # type: ignore
+            loss = loss_fn(outputs, targets)
+
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         return {"loss": loss}
 

@@ -11,7 +11,7 @@ from .transform_registry import BaseTransform, TransformRegistry
 class ResizeXY(BaseTransform):
     """Resize the X and Y dimensions of all images to target size using bicubic interpolation.
 
-    Works with both numpy arrays and PyTorch tensors.
+    Works with both numpy arrays, PyTorch tensors, and lists of numpy arrays.
 
     Args:
         target_size (Union[Tuple[int, int], int]): Target size for X and Y dimensions.
@@ -31,7 +31,66 @@ class ResizeXY(BaseTransform):
     def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
         images = x["images"]
 
-        if isinstance(images, torch.Tensor):
+        # New case: List of numpy arrays
+        if isinstance(images, list):
+            import cv2
+
+            # Process each array in the list separately
+            resized_list = []
+            for img_array in images:
+                if not isinstance(img_array, np.ndarray):
+                    raise TypeError(f"Expected numpy array in list, got {type(img_array)}")
+
+                # Get the shape of the current array
+                if img_array.ndim == 4:  # If array has format [C, Z, X, Y]
+                    C, Z, _, _ = img_array.shape
+                    resized_array = np.zeros((C, Z, self.target_size[0], self.target_size[1]), dtype=img_array.dtype)
+
+                    # Map PyTorch interpolation modes to OpenCV interpolation flags
+                    mode_map = {
+                        "nearest": cv2.INTER_NEAREST,
+                        "linear": cv2.INTER_LINEAR,
+                        "bilinear": cv2.INTER_LINEAR,
+                        "bicubic": cv2.INTER_CUBIC,
+                        "area": cv2.INTER_AREA,
+                    }
+
+                    interpolation = mode_map.get(self.mode, cv2.INTER_CUBIC)
+
+                    # Resize each slice
+                    for c in range(C):
+                        for z in range(Z):
+                            resized_array[c, z] = cv2.resize(
+                                img_array[c, z],
+                                (self.target_size[1], self.target_size[0]),  # OpenCV expects (width, height)
+                                interpolation=interpolation,
+                            )
+
+                    resized_list.append(resized_array)
+                else:
+                    # Handle other dimensionalities as needed
+                    # For example, if you have [Z, X, Y] format:
+                    Z, _, _ = img_array.shape
+                    resized_array = np.zeros((Z, self.target_size[0], self.target_size[1]), dtype=img_array.dtype)
+
+                    mode_map = {
+                        "nearest": cv2.INTER_NEAREST,
+                        "linear": cv2.INTER_LINEAR,
+                        "bilinear": cv2.INTER_LINEAR,
+                        "bicubic": cv2.INTER_CUBIC,
+                        "area": cv2.INTER_AREA,
+                    }
+
+                    interpolation = mode_map.get(self.mode, cv2.INTER_CUBIC)
+
+                    for z in range(Z):
+                        resized_array[z] = cv2.resize(img_array[z], (self.target_size[1], self.target_size[0]), interpolation=interpolation)
+
+                    resized_list.append(resized_array)
+
+            x["images"] = resized_list
+
+        elif isinstance(images, torch.Tensor):
             # PyTorch tensor case: (C, Z, X, Y)
             C, Z, _, _ = images.shape
 
@@ -86,6 +145,8 @@ class ResizeXY(BaseTransform):
 class ResampleZ(BaseTransform):
     """Resample the Z-dimension (number of slices) of all volumes to a fixed number.
 
+    Works with PyTorch tensors, numpy arrays, and lists of numpy arrays.
+
     Args:
         target_slices (int): Target number of slices in Z dimension
         mode (str): Interpolation mode. Default is 'linear'.
@@ -103,7 +164,94 @@ class ResampleZ(BaseTransform):
     def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
         images = x["images"]
 
-        if isinstance(images, torch.Tensor):
+        # New case: List of numpy arrays
+        if isinstance(images, list):
+            resampled_list = []
+
+            for img_array in images:
+                if not isinstance(img_array, np.ndarray):
+                    raise TypeError(f"Expected numpy array in list, got {type(img_array)}")
+
+                # Get the shape and determine how to process
+                if img_array.ndim == 4:  # [C, Z, X, Y] format
+                    C, Z, H, W = img_array.shape
+
+                    if Z == self.target_slices:
+                        # No resampling needed
+                        resampled_list.append(img_array)
+                        continue
+
+                    if self.center_around_median and Z > 1:
+                        # Find the median slice index
+                        median_slice = Z // 2
+
+                        # Calculate start and end indices to center around median
+                        if self.target_slices >= Z:
+                            # Upsampling: use the full range and interpolate
+                            resampled = self._resample_numpy(img_array, self.target_slices)
+                        else:
+                            # Downsampling: take a centered subset and then interpolate if needed
+                            half_target = self.target_slices // 2
+                            start = max(0, median_slice - half_target)
+                            end = min(Z, start + self.target_slices)
+
+                            # Adjust start if end hit the boundary
+                            if end == Z:
+                                start = max(0, Z - self.target_slices)
+
+                            subset = img_array[:, start:end]
+                            if subset.shape[1] != self.target_slices:
+                                resampled = self._resample_numpy(subset, self.target_slices)
+                            else:
+                                resampled = subset
+                    else:
+                        # Resample the entire Z dimension uniformly
+                        resampled = self._resample_numpy(img_array, self.target_slices)
+
+                    resampled_list.append(resampled)
+                else:
+                    # Handle [Z, X, Y] format
+                    Z, H, W = img_array.shape
+
+                    if Z == self.target_slices:
+                        resampled_list.append(img_array)
+                        continue
+
+                    if self.center_around_median and Z > 1:
+                        median_slice = Z // 2
+
+                        if self.target_slices >= Z:
+                            # Expand dimension to [1, Z, H, W] for resampling then squeeze back
+                            expanded = np.expand_dims(img_array, axis=0)
+                            resampled = self._resample_numpy(expanded, self.target_slices)
+                            resampled = np.squeeze(resampled, axis=0)
+                        else:
+                            half_target = self.target_slices // 2
+                            start = max(0, median_slice - half_target)
+                            end = min(Z, start + self.target_slices)
+
+                            if end == Z:
+                                start = max(0, Z - self.target_slices)
+
+                            subset = img_array[start:end]
+                            if subset.shape[0] != self.target_slices:
+                                # Expand dimension for resampling then squeeze back
+                                expanded = np.expand_dims(subset, axis=0)
+                                resampled = self._resample_numpy(expanded, self.target_slices)
+                                resampled = np.squeeze(resampled, axis=0)
+                            else:
+                                resampled = subset
+                    else:
+                        # Expand dimension for resampling then squeeze back
+                        expanded = np.expand_dims(img_array, axis=0)
+                        resampled = self._resample_numpy(expanded, self.target_slices)
+                        resampled = np.squeeze(resampled, axis=0)
+
+                    resampled_list.append(resampled)
+
+            x["images"] = resampled_list
+
+        elif isinstance(images, torch.Tensor):
             # PyTorch tensor case
             C, Z, H, W = images.shape
 
@@ -198,21 +346,36 @@ class ResampleZ(BaseTransform):
         """Helper method to resample NumPy array in Z dimension."""
         from scipy.ndimage import zoom
 
-        C, Z, H, W = images.shape
+        # Handle the dimensionality of the input array
+        if images.ndim == 4:  # [C, Z, H, W] format
+            C, Z, H, W = images.shape
 
-        # Calculate zoom factor for Z dimension
-        z_factor = target_slices / Z
+            # Calculate zoom factor for Z dimension
+            z_factor = target_slices / Z
 
-        # Create output array
-        resampled = np.zeros((C, target_slices, H, W), dtype=images.dtype)
+            # Create output array
+            resampled = np.zeros((C, target_slices, H, W), dtype=images.dtype)
 
-        # Apply zoom for each channel
-        for c in range(C):
+            # Apply zoom for each channel
+            for c in range(C):
+                if self.mode == "nearest":
+                    resampled[c] = zoom(images[c], (z_factor, 1, 1), order=0)
+                else:
+                    # Linear interpolation
+                    resampled[c] = zoom(images[c], (z_factor, 1, 1), order=1)
+        elif images.ndim == 3:  # [Z, H, W] format
+            Z, H, W = images.shape
+
+            # Calculate zoom factor for Z dimension
+            z_factor = target_slices / Z
+
+            # Apply zoom directly
             if self.mode == "nearest":
-                resampled[c] = zoom(images[c], (z_factor, 1, 1), order=0)
+                resampled = zoom(images, (z_factor, 1, 1), order=0)
             else:
-                # Linear interpolation
-                resampled[c] = zoom(images[c], (z_factor, 1, 1), order=1)
+                resampled = zoom(images, (z_factor, 1, 1), order=1)
+        else:
+            raise ValueError(f"Unsupported array shape with dimensions: {images.ndim}")
 
         return resampled
 
@@ -237,6 +400,9 @@ class Normalize(BaseTransform):
 
     def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
         images = x["images"]
+        if isinstance(images, list):
+            images = np.stack(images, axis=0)
+
         if isinstance(images, torch.Tensor):
             images = images.float()
             if self.percentiles is not None:

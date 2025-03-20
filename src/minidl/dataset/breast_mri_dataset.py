@@ -339,10 +339,9 @@ class BreastMRIDataset(Dataset):
         if len(series_images) != len(self.required_phases):
             raise RuntimeError(f"Not all required phases loaded for patient {patient_id}")
 
-        images = np.stack(series_images, axis=0)
         clinical_data = self._get_clinical_features(patient_id)
 
-        data = {"images": images, "patient_id": patient_id, **clinical_data}
+        data = {"images": series_images, "patient_id": patient_id, **clinical_data}
         if self.transform:
             data = self.transform(data)
 

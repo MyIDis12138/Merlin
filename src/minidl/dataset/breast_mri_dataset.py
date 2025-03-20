@@ -3,19 +3,22 @@ import logging
 import os
 import re
 import warnings
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Hashable
 
 import numpy as np
 import pandas as pd
 import pydicom
-import torch
 from torch.utils.data import Dataset
+
+from .dataset_registry import DatasetRegistry
 
 logger = logging.getLogger(__name__)
 
 
+@DatasetRegistry.register("bmri_dataset")
 class BreastMRIDataset(Dataset):
     """Breast MRI Dataset Loader
 
@@ -26,9 +29,11 @@ class BreastMRIDataset(Dataset):
         root_dir/
         ├── Breast_MRI_001/
         │   └── patient_directory/
-        │       ├── dynamic_sequence_1/
+        │       ├── dynamic_sequence_Ph1/
         │       │   └── *.dcm files
-        │       ├── dynamic_sequence_2/
+        │       ├── dynamic_sequence_Ph2/
+        │       │   └── *.dcm files
+        │       ├── dynamic_sequence_Ph3/
         │       │   └── *.dcm files
         │       └── ...
         ├── Breast_MRI_002/
@@ -36,7 +41,7 @@ class BreastMRIDataset(Dataset):
 
     Features:
         1. Automatic handling of multi-level DICOM file structures
-        2. Batch loading of dynamic sequences (5 timepoints per patient)
+        2. Batch loading of 3 specific dynamic sequences per patient (Ph1, Ph2, Ph3)
         3. Integration of clinical data and molecular subtype information
         4. Support for flexible data transformation pipelines
         5. Comprehensive data validation and error handling
@@ -49,15 +54,15 @@ class BreastMRIDataset(Dataset):
 
     Return Format:
         Each sample returns a dictionary containing:
-        - 'images': Tensor of shape [5, D, H, W] representing 3D images at 5 timepoints
+        - 'images': Tensor of shape [3, D, H, W] representing 3D images at 3 timepoints
         - 'patient_id': Patient identifier
         - 'molecular_subtype': Molecular subtype (if clinical data is provided)
-        - 'clinical_features': Dictionary of additional clinical features (if specified)
+        - 'clinical_features': dictionary of additional clinical features (if specified)
 
     Args:
         root_dir (str): Root directory path containing the dataset
         clinical_data_path (str, optional): Path to Clinical_and_Other_Features.xlsx file
-        clinical_features_columns (List[Tuple[str, str, str]], optional): List of clinical features to extract.
+        clinical_features_columns (list[tuple[str, str, str]], optional): list of clinical features to extract.
             Each tuple should contain (category, feature_name, description) matching the Excel file's
             multi-level column headers. For example:
             [
@@ -65,28 +70,28 @@ class BreastMRIDataset(Dataset):
                 ('Demographics', 'Menopause (at diagnosis)', '{0 = pre, 1 = post, 2 = N/A}'),
             ]
         transform (callable, optional): Transform pipeline for image preprocessing
-        patient_indices (List[int], optional): List of Breast_MRI_XXX indices to load
+        patient_indices (list[int], optional): list of Breast_MRI_XXX indices to load
         max_workers (int): Maximum number of worker threads for parallel processing
         cache_size (int): Size of the LRU cache for DICOM reading
 
     Raises:
         FileNotFoundError: When root directory doesn't exist or no valid Breast_MRI_XXX directories found
-        RuntimeError: When no valid patient data or insufficient dynamic sequences found
+        RuntimeError: When no valid patient data or required dynamic sequences not found
         ValueError: When patient indices are out of range or invalid
     """
 
     def __init__(
         self,
         root_dir: str,
-        clinical_data_path: Optional[str] = None,
-        clinical_label: Tuple[str, str, str] = (
+        clinical_data_path: str | None = None,
+        clinical_label: tuple[str, str, str] = (
             "Tumor Characteristics",
             "Mol Subtype",
             "{0 = luminal-like,\n1 = ER/PR pos, HER2 pos,\n2 = her2,\n3 = trip neg}",
         ),
-        clinical_features_columns: Optional[List[Tuple[str, str, str]]] = None,
-        transform: Optional[Callable] = None,
-        patient_indices: Optional[List[int]] = None,
+        clinical_features_columns: list[tuple[str, str, str]] | None = None,
+        transform: Callable | None = None,
+        patient_indices: list[int] | None = None,
         max_workers: int = 4,
     ):
         self.root_dir = root_dir
@@ -96,25 +101,28 @@ class BreastMRIDataset(Dataset):
         self.clinical_ID_col = ("Patient Information", "Patient ID", "")
         self.max_workers = max_workers
 
+        # Required sequence phases
+        self.required_phases = ["Ph1", "Ph2", "Ph3"]
+
         # Initialize thread pool
         self.thread_pool = ThreadPoolExecutor(max_workers=self.max_workers)
 
         self._initialize_clinical_data(clinical_data_path)
         self._initialize_patient_data(patient_indices)
 
-    def _initialize_clinical_data(self, clinical_data_path: Optional[str]) -> None:
+    def _initialize_clinical_data(self, clinical_data_path: str | None) -> None:
         """Initialize clinical data from Excel file."""
         self.clinical_data = None
         if clinical_data_path is not None:
             try:
                 self.clinical_data = pd.read_excel(clinical_data_path, header=[0, 1, 2])
-                self.clinical_data.columns = [col[:-1] + ("",) if "Unnamed" in col[-1] else col for col in self.clinical_data.columns]
+                self.clinical_data.columns = [col[:-1] + ("",) if "Unnamed" in col[-1] else col for col in self.clinical_data.columns]  # type: ignore
                 logger.info(f"Successfully loaded clinical data from {clinical_data_path}")
             except Exception as e:
                 logger.warning(f"Failed to load clinical data: {e}")
                 self.clinical_data = None
 
-    def _initialize_patient_data(self, patient_indices: Optional[List[int]]) -> None:
+    def _initialize_patient_data(self, patient_indices: list[int] | None) -> None:
         """Initialize patient directories and validate data."""
         # Find and validate directories
         all_mri_dirs = self._get_valid_mri_dirs(patient_indices)
@@ -130,7 +138,7 @@ class BreastMRIDataset(Dataset):
         # Initialize patient data
         self.patient_data = self._initialize_dynamic_sequences()
 
-    def _get_valid_mri_dirs(self, patient_indices: Optional[List[int]]) -> List[str]:
+    def _get_valid_mri_dirs(self, patient_indices: list[int] | None) -> list[str]:
         """
         Get valid MRI directories based on the specified patient indices.
 
@@ -138,7 +146,7 @@ class BreastMRIDataset(Dataset):
             patient_indices: Optional list of patient indices to filter directories
 
         Returns:
-            List of valid MRI directory paths
+            list of valid MRI directory paths
         """
         # Find all directories matching Breast_MRI_XXX pattern
         all_mri_dirs = glob.glob(os.path.join(self.root_dir, "Breast_MRI_*"))
@@ -159,7 +167,6 @@ class BreastMRIDataset(Dataset):
         # Sort directories by numerical order
         valid_mri_dirs.sort(key=lambda x: int(os.path.basename(x).split("_")[-1]))
         available_indices = sorted(dir_indices.keys())
-        logger.info(f"Found {len(valid_mri_dirs)} valid Breast_MRI_XXX directories with indices: {available_indices}")
 
         # If patient indices are provided, filter Breast_MRI_XXX directories
         if patient_indices is not None:
@@ -172,58 +179,102 @@ class BreastMRIDataset(Dataset):
 
         return valid_mri_dirs
 
-    def _get_valid_patient_dirs(self, mri_dirs: List[str]) -> List[str]:
+    def _identify_phase(self, sequence_folder: str) -> str | None:
+        """
+        Identify dynamic phase based on folder name.
+
+        Args:
+            sequence_folder: Path to sequence folder
+
+        Returns:
+            Phase name or None if not a valid phase
+        """
+        folder_name = os.path.basename(sequence_folder)
+
+        # Check if it's a dynamic sequence first
+        if not (("dyn" in folder_name.lower()) or ("vibrant" in folder_name.lower())):
+            return None
+
+        # Identify specific phase
+        if ("ph1" in folder_name.lower()) or ("1st" in folder_name.lower()):
+            return "Ph1"
+        elif ("ph2" in folder_name.lower()) or ("2nd" in folder_name.lower()):
+            return "Ph2"
+        elif ("ph3" in folder_name.lower()) or ("3rd" in folder_name.lower()):
+            return "Ph3"
+
+        return None
+
+    def _get_valid_patient_dirs(self, mri_dirs: list[str]) -> list[str]:
         """
         Get valid patient directories from MRI directories.
 
         Args:
-            mri_dirs: List of MRI directory paths
+            mri_dirs: list of MRI directory paths
 
         Returns:
-            List of valid patient directory paths
+            list of valid patient directory paths
         """
         patient_dirs = []
         for mri_dir in mri_dirs:
             patient_subdirs = [d for d in glob.glob(os.path.join(mri_dir, "*")) if os.path.isdir(d)]
 
-            # Only add directories that have at least 5 dynamic sequences
+            # Check each patient directory
             for patient_dir in patient_subdirs:
-                dyn_series = sorted([d for d in glob.glob(os.path.join(patient_dir, "*")) if "dyn" in d.lower()])
-                if len(dyn_series) >= 5:
+                sequence_dirs = [d for d in glob.glob(os.path.join(patient_dir, "*")) if os.path.isdir(d)]
+
+                # Check if all required phases are available
+                phases_found = set()
+                for seq_dir in sequence_dirs:
+                    phase = self._identify_phase(seq_dir)
+                    if phase:
+                        phases_found.add(phase)
+
+                if all(phase in phases_found for phase in self.required_phases):
                     patient_dirs.append(patient_dir)
                 else:
-                    logger.warning(
-                        f"Warning: Patient directory {os.path.basename(patient_dir)} has insufficient dynamic sequences (found {len(dyn_series)})"
-                    )
+                    missing_phases = set(self.required_phases) - phases_found
+                    logger.warning(f"Warning: Patient directory {os.path.basename(patient_dir)} is missing required phases: {missing_phases}")
 
         return sorted(patient_dirs)
 
-    def _initialize_dynamic_sequences(self) -> List[List[str]]:
+    def _initialize_dynamic_sequences(self) -> list[dict[str, str]]:
         """
         Initialize dynamic sequences for all valid patient directories.
 
         Returns:
-            List of lists containing paths to dynamic sequence directories for each patient
+            list of dictionaries mapping phase names to their directory paths
         """
         patient_data = []
 
-        # Preprocess: find 5 dynamic sequences for each patient
         for patient_dir in self.patient_dirs:
-            dyn_series = sorted([d for d in glob.glob(os.path.join(patient_dir, "*")) if "dyn" in d.lower()])
+            sequence_dirs = [d for d in glob.glob(os.path.join(patient_dir, "*")) if os.path.isdir(d)]
 
-            if len(dyn_series) >= 5:  # Ensure at least 5 dynamic sequences
-                patient_data.append(dyn_series[:5])  # Take only the first 5
+            # Map of phases to directories
+            phase_to_dir = {}
+
+            # Identify phases
+            for seq_dir in sequence_dirs:
+                phase = self._identify_phase(seq_dir)
+                if phase in self.required_phases:
+                    phase_to_dir[phase] = seq_dir
+
+            # Check if all required phases are available
+            if all(phase in phase_to_dir for phase in self.required_phases):
+                patient_data.append(phase_to_dir)
                 logger.debug(f"Successfully loaded patient directory: {os.path.basename(patient_dir)}")
+            else:
+                logger.warning(f"Skipping patient {os.path.basename(patient_dir)}: missing required phases")
 
         if not patient_data:
-            raise RuntimeError("No valid patient data found (requires at least 5 dynamic sequences per patient)")
+            raise RuntimeError("No valid patient data found with all required dynamic phases")
 
         logger.info(f"Successfully loaded {len(patient_data)} valid patient datasets")
         return patient_data
 
     @staticmethod
     @lru_cache(maxsize=128)
-    def _read_dicom_file(file_path: str) -> np.ndarray:
+    def _read_dicom_file(file_path: str) -> np.ndarray | None:
         """Read a DICOM file and return its pixel array."""
         try:
             with warnings.catch_warnings():
@@ -233,7 +284,7 @@ class BreastMRIDataset(Dataset):
             logger.error(f"Error reading DICOM file {file_path}: {e}")
             return None
 
-    def _load_sequence_images(self, series_path: str) -> Optional[np.ndarray]:
+    def _load_sequence_images(self, series_path: str) -> np.ndarray | None:
         """Load all DICOM images in a sequence directory."""
         dicom_files = sorted(glob.glob(os.path.join(series_path, "*.dcm")))
         if not dicom_files:
@@ -245,7 +296,7 @@ class BreastMRIDataset(Dataset):
 
         return np.stack(slices, axis=0) if slices else None
 
-    def _get_clinical_features(self, patient_id: str) -> Dict[str, Any]:
+    def _get_clinical_features(self, patient_id: str) -> dict[str, Any]:
         """Get clinical features for a patient."""
         if self.clinical_data is None:
             return {"molecular_subtype": None, "clinical_features": {}}
@@ -257,7 +308,7 @@ class BreastMRIDataset(Dataset):
 
             molecular_subtype = patient_data[self.clinical_label].values[0]
 
-            clinical_features: Dict[str, Any] = {}
+            clinical_features: dict[Hashable, Any] = {}
             if self.clinical_features_columns:
                 features_df = patient_data[self.clinical_features_columns]
                 clinical_features = features_df.to_dict(orient="records")[0] if not features_df.empty else {}
@@ -267,33 +318,33 @@ class BreastMRIDataset(Dataset):
             logger.exception(f"Failed to load clinical data for patient {patient_id}: {e}")
             return {"molecular_subtype": None, "clinical_features": {}}
 
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
+    def __getitem__(self, idx: int) -> dict[str, Any]:
         """Get a single patient's data."""
-        patient_series = self.patient_data[idx]
-        patient_dir = os.path.dirname(patient_series[0])
+        phase_dirs = self.patient_data[idx]
+
+        # Get patient ID from directory structure
+        patient_dir = os.path.dirname(next(iter(phase_dirs.values())))
         patient_id = os.path.basename(os.path.dirname(patient_dir))
 
-        # Load sequences in parallel
+        # Load phases in order
         series_images = []
-        for series_path in patient_series:
-            volume = self._load_sequence_images(series_path)
+        for phase in self.required_phases:
+            volume = self._load_sequence_images(phase_dirs[phase])
             if volume is not None:
                 series_images.append(volume)
+            else:
+                raise RuntimeError(f"Failed to load {phase} for patient {patient_id}")
 
-        if not series_images:
-            raise RuntimeError(f"No valid DICOM images loaded for patient {patient_id}")
+        if len(series_images) != len(self.required_phases):
+            raise RuntimeError(f"Not all required phases loaded for patient {patient_id}")
 
-        # Stack sequences and apply transforms
-        images = np.stack(series_images, axis=0)
-        if self.transform:
-            images = self.transform(images)
-        else:
-            images = torch.from_numpy(images).float()
-
-        # Get clinical features
         clinical_data = self._get_clinical_features(patient_id)
 
-        return {"images": images, "patient_id": patient_id, **clinical_data}
+        data = {"images": series_images, "patient_id": patient_id, **clinical_data}
+        if self.transform:
+            data = self.transform(data)
+
+        return data
 
     def __len__(self) -> int:
         return len(self.patient_data)

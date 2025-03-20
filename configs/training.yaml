@@ -1,28 +1,30 @@
-batch_size: 32
-learning_rate: 0.001
-epochs: 100
+training:
+  batch_size: 2
+  learning_rate: 0.001
+  epochs: 100
 
-optimizer:
-  type: "adam"
-  params:
-    beta1: 0.9
-    beta2: 0.999
-    epsilon: 1e-8
+  optimizer:
+    name: "adam"
+    params:
+      beta1: 0.9
+      beta2: 0.999
+      epsilon: 1e-8
 
-scheduler:
-  type: "reduce_on_plateau"
-  params:
-    mode: "min"
-    factor: 0.1
-    patience: 10
-    min_lr: 1e-6
+  scheduler:
+    name: "reduce_on_plateau"
+    params:
+      mode: "min"
+      factor: 0.1
+      patience: 10
+      min_lr: 1e-6
 
-loss:
-  type: "cross_entropy"
-  params:
-    weight: null  # Can be set for class imbalance
+  loss:
+    name: "focal_loss"
+    alpha: 0.25
+    gamma: 2.0
+    reduction: "mean"
 
-metrics:
-  - accuracy
-  - f1_score
-  - auc
+  metrics:
+    - accuracy
+    - f1_score
+    - auc

@@ -20,6 +20,10 @@ dependencies = [
     "pydicom>=3.0.0",
     "pandas>=2.2.0",
     "openpyxl>=3.1.2",
+    "opencv-python",
+    "scipy",
+    "tqdm",
+    "tensorboard"
 ]
 
 
@@ -50,8 +54,8 @@ where = ["src"]
 
 [tool.flake8]
 max-line-length = 150
-exclude = [".git", "__pycache__", ".venv", "build", "dist", ".mypy_cache", "notebooks"]
-ignore = ["W503", "TYP001"]
+exclude = [".git", "__pycache__", ".venv", "build", "dist", ".mypy_cache", "notebooks/*"]
+ignore = ["W503", "TYP001", "E203"]
 
 
 [tool.black]

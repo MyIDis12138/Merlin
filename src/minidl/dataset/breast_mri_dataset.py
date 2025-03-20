@@ -111,7 +111,7 @@ class BreastMRIDataset(Dataset):
         if clinical_data_path is not None:
             try:
                 self.clinical_data = pd.read_excel(clinical_data_path, header=[0, 1, 2])
-                self.clinical_data.columns = [col[:-1] + "" if "Unnamed" in col[-1] else col for col in self.clinical_data.columns]
+                self.clinical_data.columns = [col[:-1] + ("",) if "Unnamed" in col[-1] else col for col in self.clinical_data.columns]  # type: ignore
                 logger.info(f"Successfully loaded clinical data from {clinical_data_path}")
             except Exception as e:
                 logger.warning(f"Failed to load clinical data: {e}")

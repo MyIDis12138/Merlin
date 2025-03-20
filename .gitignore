@@ -18,6 +18,8 @@ venv/
 *.pkl
 *.joblib
 data/
+# ignore the link symbol
+data
 models/
 runs/
 

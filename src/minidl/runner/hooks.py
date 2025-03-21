@@ -489,26 +489,49 @@ class WandbLoggerHook(Hook):
             wandb.log(metrics_dict, step=runner.iter)
 
     def after_train_epoch(self, runner):
-        """Log training metrics to wandb after each training epoch."""
+        """Log training metrics to wandb after each training epoch."""    
         # Log training metrics
-        if hasattr(runner, "train_metrics") and runner.train_metrics:
+        if hasattr(runner, 'train_metrics') and runner.train_metrics:
             metrics = {f"train/{k}": v for k, v in runner.train_metrics.items()}
             metrics["epoch"] = runner.current_epoch
-
-            # Add gradient norm histogram if available
-            if hasattr(runner, "grad_norm_history") and runner.grad_norm_history:
-                # Convert to tensor for wandb
-                grad_norm_tensor = torch.tensor(runner.grad_norm_history[-len(runner.train_dataloader) :])
-                metrics["train/grad_norm_hist"] = wandb.Histogram(grad_norm_tensor.numpy())
-
-                # Also log min, max, mean, std of gradient norms for this epoch
-                if len(grad_norm_tensor) > 0:
-                    metrics["train/grad_norm_min"] = grad_norm_tensor.min().item()
-                    metrics["train/grad_norm_max"] = grad_norm_tensor.max().item()
-                    metrics["train/grad_norm_mean"] = grad_norm_tensor.mean().item()
-                    metrics["train/grad_norm_std"] = grad_norm_tensor.std().item()
-
-            wandb.log(metrics, step=runner.iter if hasattr(runner, "iter") else None)
+            
+            # Try to log gradient norms if model is available and log_grad_norm is enabled
+            if self.log_grad_norm and hasattr(runner, 'model') and runner.model is not None:
+                try:
+                    # Calculate gradient norm
+                    grad_norm_tensor = torch.tensor([
+                        p.grad.norm().item() if p.grad is not None else 0.0
+                        for p in runner.model.parameters() if p.requires_grad
+                    ])
+                    
+                    # Filter out non-finite values (inf, -inf, nan)
+                    finite_mask = torch.isfinite(grad_norm_tensor)
+                    if torch.any(finite_mask):  # Only proceed if we have some finite values
+                        finite_grads = grad_norm_tensor[finite_mask]
+                        
+                        # Add gradient norm statistics
+                        metrics["train/grad_norm_mean"] = finite_grads.mean().item()
+                        metrics["train/grad_norm_median"] = finite_grads.median().item()
+                        metrics["train/grad_norm_max"] = finite_grads.max().item()
+                        
+                        # Create histogram only with finite values
+                        if len(finite_grads) > 0:
+                            try:
+                                metrics["train/grad_norm_hist"] = wandb.Histogram(finite_grads.cpu().numpy())
+                            except Exception as e:
+                                if hasattr(runner, 'logger'):
+                                    runner.logger.warning(f"Failed to create gradient histogram: {e}")
+                                
+                    else:
+                        # All values are non-finite, log this event
+                        if hasattr(runner, 'logger'):
+                            runner.logger.warning("All gradient norms are non-finite, skipping histogram")
+                            
+                except Exception as e:
+                    if hasattr(runner, 'logger'):
+                        runner.logger.warning(f"Failed to log gradient norms: {e}")
+            
+            wandb.log(metrics, step=runner.iter if hasattr(runner, 'iter') else None)
 
     def after_val_epoch(self, runner):
         """Log validation metrics to wandb after each validation epoch."""

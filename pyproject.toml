@@ -23,7 +23,8 @@ dependencies = [
     "opencv-python",
     "scipy",
     "tqdm",
-    "tensorboard"
+    "tensorboard",
+    "scikit-learn",
 ]
 
 

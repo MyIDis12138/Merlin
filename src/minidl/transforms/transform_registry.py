@@ -92,14 +92,8 @@ class TransformBuilder:
         if transform_type is None:
             raise ValueError("Transform type must be specified in config (type)")
 
-        # Get transform class
         transform_cls = TransformRegistry.get(transform_type)
-
-        # Extract transform parameters
-        transform_args = {k: v for k, v in config.items() if k != "name"}
-
-        # Create transform instance
-        return transform_cls(**transform_args)
+        return transform_cls(**config.get('params', {}))
 
     @classmethod
     def register_transform(cls, name: str, transform_cls: type[BaseTransform]) -> None:

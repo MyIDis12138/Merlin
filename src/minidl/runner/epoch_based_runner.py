@@ -85,6 +85,7 @@ class EpochBasedRunner(BaseRunner):
 
         runner_config = config.get("runner", {})
         self.max_epochs = runner_config.get("max_epochs", 100)
+        
         self.current_epoch = 0
         self.iter = 0
 
@@ -97,7 +98,7 @@ class EpochBasedRunner(BaseRunner):
         self.grad_norm = torch.tensor(0.0)
         self.grad_norm_history: list[float] = []
         self.train_step_metrics: dict[str, torch.Tensor] = {}
-
+        
     @ensure_model_initialized
     def train_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
         """Perform a single training step.
@@ -163,12 +164,12 @@ class EpochBasedRunner(BaseRunner):
             outputs = model(inputs)
             loss = loss_fn(outputs, targets)
 
-            preds = torch.argmax(outputs, dim=1)
-            correct = (preds == targets).sum().item()
-            total = targets.size(0)
-            accuracy = correct / total
+            metrics = {}
+            if hasattr(self, 'metrics_calculator'):
+                metrics = self.metrics_calculator.compute_metrics(outputs, targets)
+                metrics = {k: torch.tensor(v, device=self.device) for k, v in metrics.items()}
 
-        return {"loss": loss, "accuracy": torch.tensor(accuracy, device=self.device)}
+        return {"loss": loss, **metrics}
 
     def test_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
         """Perform a single test step.

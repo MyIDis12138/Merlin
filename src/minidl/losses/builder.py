@@ -24,9 +24,6 @@ def build_loss(config: dict[str, Any]) -> nn.Module:
 
     loss_type = loss_config.get("name", "CrossEntropyLoss")
 
-    # Extract parameters, excluding the type key
-    loss_params = {k: v for k, v in loss_config.items() if k != "name"}
-
     # Try to get the loss from the registry first
     try:
         loss_class = LossRegistry.get(loss_type)
@@ -38,4 +35,4 @@ def build_loss(config: dict[str, Any]) -> nn.Module:
             raise ValueError(f"Loss type {loss_type} not found in registry or torch.nn")
 
     # Instantiate the loss function
-    return loss_class(**loss_params)
+    return loss_class(**loss_config.get('params', {}))

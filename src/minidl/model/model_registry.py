@@ -88,6 +88,5 @@ class ModelBuilder:
             raise ValueError("Config must specify model name (model.name)")
 
         model_cls = ModelRegistry.get(model_name)
-        model_args = {k: v for k, v in model_config.items() if k != "name"}
 
-        return model_cls(**model_args)
+        return model_cls(**model_config.get('params', {}))

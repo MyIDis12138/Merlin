@@ -46,26 +46,36 @@ def deep_merge(dict1, dict2):
 
 def load_config(config_path):
     """Load and merge configuration files."""
+    # Add a constructor for scientific notation
+    def scientific_constructor(loader, node):
+        value = loader.construct_scalar(node)
+        try:
+            return float(value)
+        except ValueError:
+            return value
+    
+    yaml.SafeLoader.add_constructor('tag:yaml.org,2002:str', scientific_constructor)
+    
     with open(config_path, "r") as f:
-        config = yaml.safe_load(f) or {}
-
+        config = yaml.load(f, Loader=yaml.SafeLoader) or {}
+    
     # Get the directory of the main config file
     config_dir = os.path.dirname(config_path)
-
+    
     # Load and merge imported configs
     if "imports" in config:
         for import_path in config["imports"]:
             import_path = os.path.join(config_dir, import_path)
             try:
                 with open(import_path, "r") as f:
-                    imported_config = yaml.safe_load(f) or {}
+                    imported_config = yaml.load(f, Loader=yaml.SafeLoader) or {}
                     config = deep_merge(config, imported_config)
             except FileNotFoundError:
                 print(f"Warning: Could not find config file {import_path}")
                 continue
-
+        
         del config["imports"]
-
+    
     return config
 
 

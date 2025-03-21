@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader, Dataset
 from minidl.dataset import DatasetBuilder
 from minidl.losses import build_loss
 from minidl.model.model_registry import ModelBuilder
+from minidl.metrics import MetricsBuilder, MetricsCalculator
 
 T = TypeVar("T")
 
@@ -86,6 +87,12 @@ class BaseRunner(ABC):
         self.work_dir = self.config.get("work_dir", "work_dirs/default")
         os.makedirs(self.work_dir, exist_ok=True)
 
+    def build_metrics(self) -> None:
+        """Build metrics from config."""
+        metrics_config = self.config.get("training", {})
+        metrics_dict = MetricsBuilder.build_metrics(metrics_config.get("metrics", []))
+        self.metrics_calculator = MetricsCalculator(metrics_dict)
+
     def build_loss(self) -> None:
         """Build loss function from config."""
         self.loss_fn = build_loss(self.config)
@@ -134,14 +141,12 @@ class BaseRunner(ABC):
             self.logger.error("Cannot build optimizer: model is None")
             return
 
-        optim_config = self.config.get("optimizer", {})
+        training_config = self.config.get("training", {})
+        optim_config = training_config.get("optimizer", {})
         optim_name = optim_config.get("name", "Adam")
 
-        # Get optimizer class and initialize
         optim_cls = getattr(torch.optim, optim_name)
-        optim_args = {k: v for k, v in optim_config.items() if k != "name"}
-
-        self.optimizer = optim_cls(self.model.parameters(), **optim_args)
+        self.optimizer = optim_cls(self.model.parameters(), **optim_config.get('params', {}))
 
         # Build scheduler if specified
         scheduler_config = self.config.get("scheduler", {})
@@ -149,8 +154,7 @@ class BaseRunner(ABC):
             scheduler_name = scheduler_config.get("name")
             if scheduler_name:
                 scheduler_cls = getattr(torch.optim.lr_scheduler, scheduler_name)
-                scheduler_args = {k: v for k, v in scheduler_config.items() if k != "name"}
-                self.scheduler = scheduler_cls(self.optimizer, **scheduler_args)
+                self.scheduler = scheduler_cls(self.optimizer, **scheduler_args.get('params', {}))
 
     def register_hook(self, hook: PrioritizedHook) -> None:
         """Register a hook function.
@@ -267,6 +271,7 @@ class BaseRunner(ABC):
         self.build_dataset()
         self.build_dataloader()
         self.build_loss()
+        self.build_metrics()
         self.build_optimizer()
 
         # Run training

@@ -15,8 +15,8 @@ dataset:
     test: [14, 26, 187, 197, 231, 288, 350, 386, 389, 453, 490, 503, 515, 595, 598, 628, 629, 708, 711, 751, 806, 815, 820, 825, 827, 842, 849]
 
   transforms:
-    XY_target_size: &XY_target_size 256
-    Z_target_size: &Z_target_size 174
+    XY_target_size: &XY_target_size 144
+    Z_target_size: &Z_target_size 96
     train:  # Transforms for training set
       - name: "ResizeXY"
         params:

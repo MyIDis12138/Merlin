@@ -2,5 +2,5 @@ model:
   name: mri_baseline
   params:
     n_classes: 4
-    d_model: 128
+    d_model: 64
     out_dropout: 0.3

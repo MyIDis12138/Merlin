@@ -85,7 +85,14 @@ class EpochBasedRunner(BaseRunner):
 
         runner_config = config.get("runner", {})
         self.max_epochs = runner_config.get("max_epochs", 100)
-        
+
+        training_config = config.get("training", {})
+
+        grad_clip_config = training_config.get("grad_clip", {})
+        self.grad_clip_enabled = grad_clip_config.get("enabled", False)
+        self.grad_clip_type = grad_clip_config.get("type", "norm")
+        self.grad_clip_value = grad_clip_config.get("value", 0.0)
+
         self.current_epoch = 0
         self.iter = 0
 
@@ -98,7 +105,7 @@ class EpochBasedRunner(BaseRunner):
         self.grad_norm = torch.tensor(0.0)
         self.grad_norm_history: list[float] = []
         self.train_step_metrics: dict[str, torch.Tensor] = {}
-        
+
     @ensure_model_initialized
     def train_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
         """Perform a single training step.
@@ -130,6 +137,14 @@ class EpochBasedRunner(BaseRunner):
 
         self.grad_norm = compute_gradient_norm(self.model, norm_type=2.0)  # type: ignore
         self.grad_norm_history.append(float(self.grad_norm))
+
+        if self.grad_clip_enabled and self.grad_clip_value > 0:
+            scaler.unscale_(optimizer)
+
+            if self.grad_clip_type == "norm":
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_value)
+            elif self.grad_clip_type == "value":
+                torch.nn.utils.clip_grad_value_(self.model.parameters(), self.grad_clip_value)
 
         scaler.step(optimizer)
         scaler.update()
@@ -165,7 +180,7 @@ class EpochBasedRunner(BaseRunner):
             loss = loss_fn(outputs, targets)
 
             metrics = {}
-            if hasattr(self, 'metrics_calculator'):
+            if hasattr(self, "metrics_calculator"):
                 metrics = self.metrics_calculator.compute_metrics(outputs, targets)
                 metrics = {k: torch.tensor(v, device=self.device) for k, v in metrics.items()}
 
@@ -303,6 +318,12 @@ class EpochBasedRunner(BaseRunner):
     def train(self) -> None:
         """Train the model for the specified number of epochs."""
         self.logger.info(f"Starting training for {self.max_epochs} epochs")
+
+        if self.grad_clip_enabled and self.grad_clip_value > 0:
+            self.logger.info(f"Gradient clipping enabled: type={self.grad_clip_type}, value={self.grad_clip_value}")
+        else:
+            self.logger.info("Gradient clipping disabled")
+
         start_time = time.time()
 
         self.call_hooks("before_train")

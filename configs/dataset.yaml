@@ -9,21 +9,23 @@ dataset:
       - ['MRI Findings', 'Lymphadenopathy or Suspicious Nodes', '{0 = no, 1 = yes}']
 
   indices:
-    # train: [358]
-    train: [2, 8, 18, 20, 47, 48, 53, 57, 59, 61, 64, 91, 92, 102, 117, 137, 145, 153, 154, 162, 180, 185, 196, 208, 221, 222, 227, 233, 243, 246, 251, 255, 257, 284, 286, 295, 311, 316, 318, 322, 329, 340, 348, 351, 352, 354, 355, 359, 375, 383, 415, 419, 423, 424, 425, 434, 435, 438, 444, 446, 456, 462, 483, 492, 516, 534, 550, 552, 555, 561, 565, 571, 579, 590, 612]
-    val: [1, 709, 722, 731, 741, 755, 776, 780, 795, 810, 821, 828, 831, 861, 873, 876, 886, 906, 921, 639, 657, 658, 662, 664, 677, 694]
-    test: [14, 26, 187, 197, 231, 288, 350, 386, 389, 453, 490, 503, 515, 595, 598, 628, 629, 708, 711, 751, 806, 815, 820, 825, 827, 842, 849]
+    train: [358]
+    # train: [2, 8, 18, 20, 47, 48, 53, 57, 59, 61, 64, 91, 92, 102, 117, 137, 145, 153, 154, 162, 180, 185, 196, 208, 221, 222, 227, 233, 243, 246, 251, 255, 257, 284, 286, 295, 311, 316, 318, 322, 329, 340, 348, 351, 352, 354, 355, 359, 375, 383, 415, 419, 423, 424, 425, 434, 435, 438, 444, 446, 456, 462, 483, 492, 516, 534, 550, 552, 555, 561, 565, 571, 579, 590, 612]
+    # val: [1, 709, 722, 731, 741, 755, 776, 780, 795, 810, 821, 828, 831, 861, 873, 876, 886, 906, 921, 639, 657, 658, 662, 664, 677, 694]
+    # test: [14, 26, 187, 197, 231, 288, 350, 386, 389, 453, 490, 503, 515, 595, 598, 628, 629, 708, 711, 751, 806, 815, 820, 825, 827, 842, 849]
 
   transforms:
+    XY_target_size: &XY_target_size 256
+    Z_target_size: &Z_target_size 174
     train:  # Transforms for training set
       - name: "ResizeXY"
         params:
-          target_size: 512
+          target_size: *XY_target_size
           mode: "bicubic"
 
       - name: "ResampleZ"
         params:
-          target_slices: 174
+          target_slices: *Z_target_size
           mode: "linear"
 
       - name: "Normalize"
@@ -36,11 +38,11 @@ dataset:
 
     val:  # Transforms for validation set
       - name: "ResizeXY"
-        target_size: 512
+        target_size: *XY_target_size
         mode: "bicubic"
 
       - name: "ResampleZ"
-        target_slices: 174
+        target_slices: *Z_target_size
         mode: "linear"
 
       - name: "Normalize"
@@ -52,11 +54,11 @@ dataset:
 
     test:  # Transforms for test set
       - name: "ResizeXY"
-        target_size: 512
+        target_size: *XY_target_size
         mode: "bicubic"
 
       - name: "ResampleZ"
-        target_slices: 174
+        target_slices: *Z_target_size
         mode: "linear"
 
       - name: "Normalize"
@@ -67,20 +69,21 @@ dataset:
       - name: "ToTensor"
 
 dataloader:
+  global_batch_size: &global_batch_size 2
   train:
-    batch_size: 2
+    batch_size: *global_batch_size
     shuffle: true
     num_workers: 4
     pin_memory: true
 
   val:
-    batch_size: 2
+    batch_size: *global_batch_size
     shuffle: false
     num_workers: 4
     pin_memory: true
 
   test:
-    batch_size: 2
+    batch_size: *global_batch_size
     shuffle: false
     num_workers: 4
     pin_memory: true

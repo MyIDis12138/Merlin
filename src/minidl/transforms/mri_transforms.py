@@ -400,36 +400,41 @@ class Normalize(BaseTransform):
 
     def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
         images = x["images"]
-        if isinstance(images, list):
-            images = np.stack(images, axis=0)
 
         if isinstance(images, torch.Tensor):
-            images = images.float()
+            images_scaled = self.normalize(images)
+        elif isinstance(images, list):
+            images_scaled = [self.normalize(image) for image in images]
+
+        x["images"] = images_scaled
+        return x
+
+    def normalize(self, image):
+        if isinstance(image, torch.Tensor):
+            image = image.float()
             if self.percentiles is not None:
-                min_val = torch.quantile(images, self.percentiles[0] / 100)
-                max_val = torch.quantile(images, self.percentiles[1] / 100)
+                min_val = torch.quantile(image, self.percentiles[0] / 100)
+                max_val = torch.quantile(image, self.percentiles[1] / 100)
             else:
-                min_val = images.min()
-                max_val = images.max()
-        else:
-            images = images.astype(np.float32)
+                min_val = image.min()
+                max_val = image.max()
+        elif isinstance(image, np.ndarray):
+            image = image.astype(np.float32)
             if self.percentiles is not None:
-                min_val = np.percentile(images, self.percentiles[0])
-                max_val = np.percentile(images, self.percentiles[1])
+                min_val = np.percentile(image, self.percentiles[0])
+                max_val = np.percentile(image, self.percentiles[1])
             else:
-                min_val = images.min()
-                max_val = images.max()
+                min_val = image.min()
+                max_val = image.max()
 
         # Avoid division by zero
         if max_val == min_val:
-            images_scaled = images * 0 + self.range_min
-            x["images"] = images_scaled
-            return x
+            image_scaled = image * 0 + self.range_min
+            return image_scaled
 
-        images_scaled = (images - min_val) / (max_val - min_val)
-        images_scaled = images_scaled * (self.range_max - self.range_min) + self.range_min
-        x["images"] = images_scaled
-        return x
+        image_scaled = (image - min_val) / (max_val - min_val)
+        image_scaled = image_scaled * (self.range_max - self.range_min) + self.range_min
+        return image_scaled
 
     def __repr__(self) -> str:
         return f"Normalize(range=({self.range_min}, {self.range_max}), percentiles={self.percentiles})"
@@ -441,8 +446,10 @@ class ToTensor(BaseTransform):
 
     def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
         images = x["images"]
+        if isinstance(images, list):
+            images = np.stack(images, axis=0)
+
         if isinstance(images, np.ndarray):
-            # Create a contiguous copy of the array to avoid negative stride issues
             images = np.ascontiguousarray(images)
             x["images"] = torch.from_numpy(images)
         return x

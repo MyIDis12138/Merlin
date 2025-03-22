@@ -58,17 +58,25 @@ class MRI_baseline(nn.Module):
             DownBlock(d_model // 2, d_model),  # d_model/2 -> d_model
         )
 
-        self.mri_adapters = nn.ModuleList([nn.Sequential(ConvBlock(d_model, d_model), ConvBlock(d_model, d_model)) for _ in range(3)])
+        self.mri_adapters = nn.ModuleList(
+            [nn.Sequential(ConvBlock(d_model, d_model), nn.BatchNorm3d(d_model), ConvBlock(d_model, d_model)) for _ in range(3)]
+        )
 
         self.spatial_attention = nn.Sequential(
-            nn.AdaptiveAvgPool3d(1), nn.Conv3d(d_model, d_model // 2, 1), nn.ReLU(inplace=True), nn.Conv3d(d_model // 2, d_model, 1), nn.Sigmoid()
+            nn.AdaptiveAvgPool3d(1), nn.Conv3d(d_model, d_model // 2, 1), nn.GELU(), nn.Conv3d(d_model // 2, d_model, 1), nn.Sigmoid()
         )
 
         self.attention = MultiHeadAttention(d_model, 4)
 
-        self.classifier = nn.Sequential(
-            nn.Linear(d_model, d_model // 2), nn.ReLU(inplace=True), nn.Dropout(out_dropout), nn.Linear(d_model // 2, n_classes)
+        self.feed_forward = nn.Sequential(
+            nn.Linear(d_model * 3, d_model * 2),
+            nn.GELU(),
+            nn.Linear(d_model * 2, d_model),
+            nn.GELU(),
         )
+        self.layer_norm = nn.LayerNorm(d_model)
+
+        self.classifier = nn.Sequential(nn.Linear(d_model, d_model * 2), nn.GELU(), nn.Dropout(out_dropout), nn.Linear(d_model * 2, n_classes))
 
     def forward(self, x):
         # x: tensor of 3 MRI images, shaped [B, 3, D, H, W]
@@ -87,11 +95,16 @@ class MRI_baseline(nn.Module):
             feat_gap = F.adaptive_avg_pool3d(feat, 1).squeeze(-1).squeeze(-1).squeeze(-1)  # [B, d_model]
             features.append(feat_gap)
 
-        V = torch.stack(features, dim=1)  # [B, 5, d_model]
+        V = torch.stack(features, dim=1)  # [B, 3, d_model]
 
         attn_output, _ = self.attention(V, V, V)
-        mean_output = torch.mean(attn_output, dim=1)  # [B, d_model]
 
-        logits = self.classifier(mean_output)  # [B, n_classes]
+        x = self.feed_forward(attn_output.view(-1, 3 * self.d_model))  # [B, 3 * d_model]
+
+        res_x = torch.mean(attn_output, dim=1)  # [B, d_model]
+
+        x = self.layer_norm(x + res_x)
+
+        logits = self.classifier(x)  # [B, n_classes]
 
         return logits

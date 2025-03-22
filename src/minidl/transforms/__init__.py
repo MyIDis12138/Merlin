@@ -1,9 +1,10 @@
 from typing import Any
 
 from .mri_transforms import MRITransformPipeline, Normalize, ToTensor
+from .tio_transforms import MRITorchIOPipeline
 from .transform_registry import TransformBuilder, TransformRegistry
 
-__all__ = ["MRITransformPipeline", "Normalize", "ToTensor", "TransformRegistry", "TransformBuilder", "build_transform_pipeline"]
+__all__ = ["MRITransformPipeline", "Normalize", "ToTensor", "TransformRegistry", "TransformBuilder", "build_transform_pipeline", "MRITorchIOPipeline"]
 
 
 def build_transform_pipeline(transform_configs: list[dict[str, Any]] | None = None) -> MRITransformPipeline:

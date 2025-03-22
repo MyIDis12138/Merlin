@@ -15,56 +15,53 @@ dataset:
     # test: [14, 26, 187, 197, 231, 288, 350, 386, 389, 453, 490, 503, 515, 595, 598, 628, 629, 708, 711, 751, 806, 815, 820, 825, 827, 842, 849]
 
   transforms:
-    XY_target_size: &XY_target_size 256
-    Z_target_size: &Z_target_size 174
-    train:  # Transforms for training set
-      - name: "ResizeXY"
+    target_size: &target_size [144, 144, 96]
+    train:
+      - name: "MRITorchIOPipeline"
         params:
-          target_size: *XY_target_size
-          mode: "bicubic"
+          transforms_config:
+            - name: "Resize"
+              params:
+                target_shape: *target_size
 
-      - name: "ResampleZ"
-        params:
-          target_slices: *Z_target_size
-          mode: "linear"
+            - name: "RandomBiasField"
 
-      - name: "Normalize"
-        params:
-          range_min: -1.0
-          range_max: 1.0
-          percentiles: [1, 99]
+            - name: "RandomMotion"
+              params:
+                degrees: 5
+                translation: 5
+                num_transforms: 2
+
+            - name: "RandomNoise"
+              params:
+                meas: 9
+                std: [0.1, 0.5]
+
+            - name: "ZNormalization"
 
       - name: "ToTensor"
 
     val:  # Transforms for validation set
-      - name: "ResizeXY"
-        target_size: *XY_target_size
-        mode: "bicubic"
+      - name: "MRITorchIOPipeline"
+        params:
+          transforms_config:
+            - name: "Resize"
+              params:
+                target_shape: *target_size
 
-      - name: "ResampleZ"
-        target_slices: *Z_target_size
-        mode: "linear"
-
-      - name: "Normalize"
-        range_min: -1.0
-        range_max: 1.0
-        percentiles: [1, 99]
+            - name: "ZNormalization"
 
       - name: "ToTensor"
 
     test:  # Transforms for test set
-      - name: "ResizeXY"
-        target_size: *XY_target_size
-        mode: "bicubic"
+      - name: "MRITorchIOPipeline"
+        params:
+          transforms_config:
+            - name: "Resize"
+              params:
+                target_shape: *target_size
 
-      - name: "ResampleZ"
-        target_slices: *Z_target_size
-        mode: "linear"
-
-      - name: "Normalize"
-        range_min: -1.0
-        range_max: 1.0
-        percentiles: [1, 99]
+            - name: "ZNormalization"
 
       - name: "ToTensor"
 

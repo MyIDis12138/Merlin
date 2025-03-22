@@ -23,6 +23,11 @@ training:
       gamma: 2.0
       reduction: "mean"
 
+  grad_clip:
+    enabled: true
+    type: "norm"
+    value: 1.0
+
   metrics:
     - accuracy
     - f1_score

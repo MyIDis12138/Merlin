@@ -15,7 +15,7 @@ classifiers = [  # See https://pypi.org/classifiers/
 ]
 dependencies = [
     "numpy==1.26.4",
-    "torch>=2.6.0",
+    "torch>=2.6.0", # upgrade, issue: http://github.com/advisories/GHSA-4vmg-rw8f-92f9
     "torchvision>=0.21.0",
     "pydicom>=3.0.0",
     "pandas>=2.2.0",

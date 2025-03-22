@@ -517,25 +517,6 @@ class WandbLoggerHook(Hook):
             metrics = {f"val/{k}": v for k, v in runner.val_metrics.items()}
             metrics["epoch"] = runner.current_epoch
             wandb.log(metrics, step=runner.iter if hasattr(runner, "iter") else None)
-            
-            # Create confusion matrix if we have prediction tracking
-            if hasattr(runner, "val_predictions") and hasattr(runner, "val_targets"):
-                if len(runner.val_predictions) > 0 and len(runner.val_targets) > 0:
-                    try:
-                        preds = torch.cat(runner.val_predictions).cpu().numpy()
-                        targets = torch.cat(runner.val_targets).cpu().numpy()
-                        
-                        # Log confusion matrix
-                        wandb.log({
-                            "val/confusion_matrix": wandb.plot.confusion_matrix(
-                                probs=None,
-                                y_true=targets, 
-                                preds=preds
-                            )
-                        }, step=runner.iter if hasattr(runner, "iter") else None)
-                    except:
-                        # Skip if there's an error creating the confusion matrix
-                        pass
 
     def after_test_epoch(self, runner):
         """Log test metrics to wandb after test epoch."""
@@ -544,25 +525,7 @@ class WandbLoggerHook(Hook):
             metrics = {f"test/{k}": v for k, v in runner.test_metrics.items()}
             metrics["epoch"] = runner.current_epoch
             wandb.log(metrics, step=runner.iter if hasattr(runner, "iter") else None)
-            
-            # Create confusion matrix if we have prediction tracking
-            if hasattr(runner, "test_predictions") and hasattr(runner, "test_targets"):
-                if len(runner.test_predictions) > 0 and len(runner.test_targets) > 0:
-                    try:
-                        preds = torch.cat(runner.test_predictions).cpu().numpy()
-                        targets = torch.cat(runner.test_targets).cpu().numpy()
-                        
-                        # Log confusion matrix
-                        wandb.log({
-                            "test/confusion_matrix": wandb.plot.confusion_matrix(
-                                probs=None,
-                                y_true=targets, 
-                                preds=preds
-                            )
-                        }, step=runner.iter if hasattr(runner, "iter") else None)
-                    except:
-                        # Skip if there's an error creating the confusion matrix
-                        pass
+
 
 @HookRegistry.register("early_stopping_hook")
 class EarlyStoppingHook(Hook):

@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 import torch
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler
 from tqdm import tqdm
 
 from .base_runner import BaseRunner
@@ -127,9 +127,9 @@ class EpochBasedRunner(BaseRunner):
             self.logger.error("Cannot perform train step: loss_fn or optimizer is None")
             return {"loss": torch.tensor(float("inf"), device=self.device)}
 
-        scaler = GradScaler()
+        scaler = GradScaler(self.device)
         optimizer.zero_grad()
-        with autocast():
+        with torch.amp.autocast(self.device.type):
             outputs = self.model(inputs)  # type: ignore
             loss = loss_fn(outputs, targets)
 

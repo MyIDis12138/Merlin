@@ -69,9 +69,9 @@ class MRI_baseline(nn.Module):
         self.attention = MultiHeadAttention(d_model, 4)
 
         self.feed_forward = nn.Sequential(
-            nn.Linear(d_model * 3, d_model),
+            nn.Linear(d_model * 3, d_model * 2),
             nn.GELU(),
-            nn.Linear(d_model * 3, d_model),
+            nn.Linear(d_model * 2, d_model),
             nn.GELU(),
         )
         self.layer_norm = nn.LayerNorm(d_model)
@@ -99,9 +99,7 @@ class MRI_baseline(nn.Module):
 
         attn_output, _ = self.attention(V, V, V)
 
-        x = torch.cat(attn_output, dim=1)
-
-        x = self.feed_forward(attn_output)  # [B, 3 * d_model]
+        x = self.feed_forward(attn_output.view(-1, 3 * self.d_model))  # [B, 3 * d_model]
 
         res_x = torch.mean(attn_output, dim=1)  # [B, d_model]
 

@@ -15,8 +15,8 @@ classifiers = [  # See https://pypi.org/classifiers/
 ]
 dependencies = [
     "numpy==1.26.4",
-    "torch==2.2.2",
-    "torchvision==0.17.2",
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
     "pydicom>=3.0.0",
     "pandas>=2.2.0",
     "openpyxl>=3.1.2",

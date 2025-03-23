@@ -14,5 +14,5 @@ experiment:
   work_dir: "output/breast_mri_classification"
   tags:
     - "baseline"
-    - "molecular_subtype"
+    - "clinical_label"
   description: "Baseline model for breast MRI molecular subtype classification"

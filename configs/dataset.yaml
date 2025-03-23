@@ -7,6 +7,8 @@ dataset:
       - ['MRI Technical Information', 'Columns', '320=0,448=1,512=2']
       - ['Tumor Characteristics', 'Staging(Metastasis)#(Mx -replaced by -1)[M]', '']
       - ['MRI Findings', 'Lymphadenopathy or Suspicious Nodes', '{0 = no, 1 = yes}']
+    clinical_label: ['Recurrence', 'Recurrence event(s)', '{0 = no, 1 = yes}']
+    # ["Tumor Characteristics", "Mol Subtype", "{0 = luminal-like,\n1 = ER/PR pos, HER2 pos,\n2 = her2,\n3 = trip neg}",]
 
   indices:
     train: [358]

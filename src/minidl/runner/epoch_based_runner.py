@@ -118,7 +118,7 @@ class EpochBasedRunner(BaseRunner):
         """
         # TODO:temporary indexing, more general indexing should be used
         inputs = batch["images"].to(self.device)
-        targets = batch["molecular_subtype"].to(self.device)
+        targets = batch["clinical_label"].to(self.device)
 
         loss_fn = self.loss_fn
         optimizer = self.optimizer
@@ -166,7 +166,7 @@ class EpochBasedRunner(BaseRunner):
         """
         # TODO:temporary indexing, more general indexing should be used
         inputs = batch["images"].to(self.device)
-        targets = batch["molecular_subtype"].to(self.device)
+        targets = batch["clinical_label"].to(self.device)
 
         model = self.model
         loss_fn = self.loss_fn

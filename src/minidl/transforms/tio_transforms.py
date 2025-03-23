@@ -92,6 +92,11 @@ class MRITorchIOPipeline(BaseTransform):
                 num_transforms=num_transforms,
             )
 
+        elif transform_name == "RandomNoise":
+            mean = params.get("mean", 0.1)
+            std = params.get("std", 0.5)
+            return tio.RandomNoise(mean=mean, std=std)
+
         else:
             logging.warning(f"Unknown transform: {transform_name}")
             return None

@@ -56,7 +56,7 @@ class BreastMRIDataset(Dataset):
         Each sample returns a dictionary containing:
         - 'images': Tensor of shape [3, D, H, W] representing 3D images at 3 timepoints
         - 'patient_id': Patient identifier
-        - 'molecular_subtype': Molecular subtype (if clinical data is provided)
+        - 'clinical_label': Molecular subtype (if clinical data is provided)
         - 'clinical_features': dictionary of additional clinical features (if specified)
 
     Args:
@@ -83,12 +83,8 @@ class BreastMRIDataset(Dataset):
     def __init__(
         self,
         root_dir: str,
+        clinical_label: list[str, str, str],
         clinical_data_path: str | None = None,
-        clinical_label: tuple[str, str, str] = (
-            "Tumor Characteristics",
-            "Mol Subtype",
-            "{0 = luminal-like,\n1 = ER/PR pos, HER2 pos,\n2 = her2,\n3 = trip neg}",
-        ),
         clinical_features_columns: list[tuple[str, str, str]] | None = None,
         transform: Callable | None = None,
         patient_indices: list[int] | None = None,
@@ -96,7 +92,7 @@ class BreastMRIDataset(Dataset):
     ):
         self.root_dir = root_dir
         self.transform = transform
-        self.clinical_label = clinical_label
+        self.clinical_label = tuple(clinical_label)
         self.clinical_features_columns = [tuple(col) for col in clinical_features_columns] if clinical_features_columns else []
         self.clinical_ID_col = ("Patient Information", "Patient ID", "")
         self.max_workers = max_workers
@@ -299,24 +295,24 @@ class BreastMRIDataset(Dataset):
     def _get_clinical_features(self, patient_id: str) -> dict[str, Any]:
         """Get clinical features for a patient."""
         if self.clinical_data is None:
-            return {"molecular_subtype": None, "clinical_features": {}}
+            return {"clinical_label": None, "clinical_features": {}}
 
         try:
             patient_data = self.clinical_data[self.clinical_data[self.clinical_ID_col] == patient_id]
             if patient_data.empty:
-                return {"molecular_subtype": None, "clinical_features": {}}
+                return {"clinical_label": None, "clinical_features": {}}
 
-            molecular_subtype = patient_data[self.clinical_label].values[0]
+            clinical_label = int(patient_data[self.clinical_label].values[0])
 
             clinical_features: dict[Hashable, Any] = {}
             if self.clinical_features_columns:
                 features_df = patient_data[self.clinical_features_columns]
                 clinical_features = features_df.to_dict(orient="records")[0] if not features_df.empty else {}
 
-            return {"molecular_subtype": molecular_subtype, "clinical_features": clinical_features}
+            return {"clinical_label": clinical_label, "clinical_features": clinical_features}
         except Exception as e:
             logger.exception(f"Failed to load clinical data for patient {patient_id}: {e}")
-            return {"molecular_subtype": None, "clinical_features": {}}
+            return {"clinical_label": None, "clinical_features": {}}
 
     def __getitem__(self, idx: int) -> dict[str, Any]:
         """Get a single patient's data."""

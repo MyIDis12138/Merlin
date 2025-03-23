@@ -20,7 +20,7 @@ runner:
     - name: "wandb_logger_hook"
       params:
         project: "Multi-modal for MRI"
-        tags: ["CNN_baseline", "molecular_subtype"]
+        tags: ["CNN_baseline", "clinical_label"]
         interval: 10
         log_artifacts: True
         log_grad_norm: True

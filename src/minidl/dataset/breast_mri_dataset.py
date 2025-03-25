@@ -23,7 +23,7 @@ class BreastMRIDataset(Dataset):
     """Breast MRI Dataset Loader
 
     A specialized dataset loader for handling dynamic contrast-enhanced breast MRI sequences,
-    with support for clinical features and molecular subtype information.
+    with support for clinical features and clinical labels information.
 
     Dataset Structure:
         root_dir/
@@ -42,21 +42,26 @@ class BreastMRIDataset(Dataset):
     Features:
         1. Automatic handling of multi-level DICOM file structures
         2. Batch loading of 3 specific dynamic sequences per patient (Ph1, Ph2, Ph3)
-        3. Integration of clinical data and molecular subtype information
+        3. Integration of clinical data and clinical label information
         4. Support for flexible data transformation pipelines
         5. Comprehensive data validation and error handling
 
-    Molecular Subtype Mapping:
-        - 0: 'luminal-like'
-        - 1: 'ER/PR pos, HER2 pos'
-        - 2: 'her2'
-        - 3: 'trip neg'
+    Possible clinical_label:
+        Molecular Subtype Mapping:
+            - 0: 'luminal-like'
+            - 1: 'ER/PR pos, HER2 pos'
+            - 2: 'her2'
+            - 3: 'trip neg'
+        
+        Recurrence Mapping:
+            - 0: no
+            - 1: yes
 
     Return Format:
         Each sample returns a dictionary containing:
         - 'images': Tensor of shape [3, D, H, W] representing 3D images at 3 timepoints
         - 'patient_id': Patient identifier
-        - 'clinical_label': Molecular subtype (if clinical data is provided)
+        - 'clinical_label': clinical_label (if clinical data is provided)
         - 'clinical_features': dictionary of additional clinical features (if specified)
 
     Args:
@@ -257,6 +262,24 @@ class BreastMRIDataset(Dataset):
 
             # Check if all required phases are available
             if all(phase in phase_to_dir for phase in self.required_phases):
+                patient_id = os.path.basename(os.path.dirname(patient_dir))
+                
+                # Skip patients without valid clinical labels if clinical data is available
+                if self.clinical_data is not None:
+                    try:
+                        patient_data_row = self.clinical_data[self.clinical_data[self.clinical_ID_col] == patient_id]
+                        if patient_data_row.empty:
+                            logger.warning(f"Skipping patient {patient_id}: no matching clinical data found")
+                            continue
+                        
+                        clinical_label_value = patient_data_row[self.clinical_label].values[0]
+                        if np.isnan(clinical_label_value):
+                            logger.warning(f"Skipping patient {patient_id}: invalid clinical label: {clinical_label_value}")
+                            continue
+                    except Exception as e:
+                        logger.warning(f"Skipping patient {patient_id}: error checking clinical label: {e}")
+                        continue
+                
                 patient_data.append(phase_to_dir)
                 logger.debug(f"Successfully loaded patient directory: {os.path.basename(patient_dir)}")
             else:

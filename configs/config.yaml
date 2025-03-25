@@ -10,8 +10,8 @@ environment:
   device: "cuda"
 
 experiment:
-  name: "breast_mri_classification"
-  work_dir: "output/breast_mri_classification"
+  name: "recurrance_dmodel_256_lr1e5"
+  work_dir: "output/recurrance_dmodel_256_lr1e5"
   tags:
     - "baseline"
     - "clinical_label"

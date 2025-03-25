@@ -35,11 +35,13 @@ class DownBlock(nn.Module):
         self.conv1 = ConvBlock(in_channels, out_channels)
         self.conv2 = ConvBlock(out_channels, out_channels)
         self.pool = nn.MaxPool3d(kernel_size=2, stride=2)
+        self.bn = nn.BatchNorm3d(out_channels)
 
     def forward(self, x):
         x = self.conv1(x)
         x = self.conv2(x)
         x = self.pool(x)
+        x = self.bn(x)
         return x
 
 

@@ -16,7 +16,7 @@ training:
   loss:
     name: "focal_loss"
     params:
-      alpha: 0.25
+      alpha: 0.5
       gamma: 2.0
       reduction: "mean"
 
@@ -28,4 +28,3 @@ training:
   metrics:
     - accuracy
     - f1_score
-    - auc

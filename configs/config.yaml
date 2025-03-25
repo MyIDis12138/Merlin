@@ -10,9 +10,9 @@ environment:
   device: "cuda"
 
 experiment:
-  name: "breast_mri_classification"
-  work_dir: "output/breast_mri_classification"
+  name: "recurrance_dmodel_256_lr1e5"
+  work_dir: "output/recurrance_dmodel_256_lr1e5"
   tags:
     - "baseline"
-    - "molecular_subtype"
+    - "clinical_label"
   description: "Baseline model for breast MRI molecular subtype classification"

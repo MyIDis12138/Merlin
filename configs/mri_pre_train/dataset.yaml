@@ -2,7 +2,8 @@ global_batch_size: &global_batch_size 16
 global_num_workers: &global_num_workers 16
 
 dataset:
-  name: "bmri_dataset"
+  name: "parallel_bmri_dataset"
+  use_torchio_loader: True
   params:
     root_dir: "data/Duke-Breast-Cancer-MRI"
     clinical_data_path: "data/Clinical_and_Other_Features.xlsx"
@@ -12,7 +13,7 @@ dataset:
       - ['MRI Findings', 'Lymphadenopathy or Suspicious Nodes', '{0 = no, 1 = yes}']
     clinical_label: ['Recurrence', 'Recurrence event(s)', '{0 = no, 1 = yes}']
     # ["Tumor Characteristics", "Mol Subtype", "{0 = luminal-like,\n1 = ER/PR pos, HER2 pos,\n2 = her2,\n3 = trip neg}",]
-    max_workers: 8
+    batch_size: *global_batch_size
 
   indices:
     train: [358]
@@ -22,7 +23,7 @@ dataset:
     # test: [14, 26, 187, 197, 231, 288, 350, 386, 389, 453, 490, 503, 515, 595, 598, 628, 629, 708, 711, 751, 806, 815, 820, 825, 827, 842, 849]
 
   transforms:
-    target_size: &target_size [144, 144, 96]
+    target_size: &target_size [200, 512, 512]
     train:
       - name: "MRITorchIOPipeline"
         params:
@@ -38,6 +39,11 @@ dataset:
                 degrees: 5
                 translation: 5
                 num_transforms: 2
+
+            - name: "RandomFlip"
+              params:
+                axes: 2
+                flip_probability: 1.0
 
             - name: "RandomNoise"
               params:

@@ -3,7 +3,6 @@ global_num_workers: &global_num_workers 16
 
 dataset:
   name: "parallel_bmri_dataset"
-  use_torchio_loader: True
   params:
     root_dir: "data/Duke-Breast-Cancer-MRI"
     clinical_data_path: "data/Clinical_and_Other_Features.xlsx"

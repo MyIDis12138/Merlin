@@ -97,6 +97,11 @@ class MRITorchIOPipeline(BaseTransform):
             std = params.get("std", 0.5)
             return tio.RandomNoise(mean=mean, std=std)
 
+        elif transform_name == "RandomFlip":
+            axes = params.get("axes", 1)
+            flip_probability = params.get("flip_probability", 0.5)
+            return tio.RandomFlip(axes=axes, flip_probability=flip_probability)
+
         else:
             logging.warning(f"Unknown transform: {transform_name}")
             return None

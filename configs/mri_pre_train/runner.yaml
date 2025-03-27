@@ -1,0 +1,32 @@
+runner:
+  name: "epoch_based_runner"
+  max_epochs: 100
+
+  hooks:
+    - name: "tensorboard_logger_hook"
+      params:
+        log_dir: "logs"
+        interval: 10
+
+    - name: "checkpoint_hook"
+      params:
+        interval: 10
+        save_optimizer: true
+        save_scheduler: true
+        out_dir: "checkpoints"
+        max_keep_ckpts: 5
+        save_best: true
+
+    - name: "wandb_logger_hook"
+      params:
+        project: "Multi-modal for MRI"
+        tags: ["CNN_baseline", "clinical_label"]
+        interval: 10
+        log_artifacts: True
+        log_grad_norm: True
+
+    - name: "early_stopping_hook"
+      params:
+        patience: 10
+        min_delta: 0.0
+        rule: "less"

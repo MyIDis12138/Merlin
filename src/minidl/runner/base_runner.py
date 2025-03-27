@@ -12,8 +12,8 @@ from torch.utils.data import DataLoader, Dataset
 
 from minidl.dataset import DatasetBuilder
 from minidl.losses import build_loss
-from minidl.model.model_registry import ModelBuilder
 from minidl.metrics import MetricsBuilder, MetricsCalculator
+from minidl.model.model_registry import ModelBuilder
 
 T = TypeVar("T")
 
@@ -146,15 +146,14 @@ class BaseRunner(ABC):
         optim_name = optim_config.get("name", "Adam")
 
         optim_cls = getattr(torch.optim, optim_name)
-        self.optimizer = optim_cls(self.model.parameters(), **optim_config.get('params', {}))
+        self.optimizer = optim_cls(self.model.parameters(), **optim_config.get("params", {}))
 
-        # Build scheduler if specified
-        scheduler_config = self.config.get("scheduler", {})
+        scheduler_config = training_config.get("scheduler", {})
         if scheduler_config and self.optimizer is not None:
             scheduler_name = scheduler_config.get("name")
             if scheduler_name:
                 scheduler_cls = getattr(torch.optim.lr_scheduler, scheduler_name)
-                self.scheduler = scheduler_cls(self.optimizer, **scheduler_args.get('params', {}))
+                self.scheduler = scheduler_cls(self.optimizer, **scheduler_config.get("params", {}))
 
     def register_hook(self, hook: PrioritizedHook) -> None:
         """Register a hook function.

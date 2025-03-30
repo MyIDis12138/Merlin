@@ -5,6 +5,80 @@ import torch.nn.functional as F
 from .loss_registry import LossRegistry
 
 
+@LossRegistry.register("balanced_ce")
+class Balanced_CrossEntropy(nn.Module):
+    """Balanced Cross Entropy Loss.
+
+    Implementation of Cross Entropy Loss with automatic class weighting
+    to handle imbalanced datasets.
+
+    Args:
+        weight_type: Strategy for computing class weights ('inverse', 'effective', or None)
+        beta: Parameter for effective number weighting when weight_type='effective'
+        reduction: Reduction method ('mean', 'sum', or 'none')
+        epsilon: Small value to prevent division by zero
+    """
+
+    def __init__(self, weight_type: str = "inverse", beta: float = 0.9, reduction: str = "mean", epsilon: float = 1e-6):
+        super().__init__()
+        self.weight_type = weight_type
+        self.beta = beta
+        self.reduction = reduction
+        self.epsilon = epsilon
+        self.register_buffer("class_weights", None)
+
+    def _compute_class_weights(self, targets: torch.Tensor, num_classes: int) -> torch.Tensor:
+        """Compute class weights based on class distribution in the current batch.
+
+        Args:
+            targets: Ground truth labels
+            num_classes: Number of classes
+
+        Returns:
+            Tensor of class weights
+        """
+        class_counts = torch.zeros(num_classes, device=targets.device)
+        for c in range(num_classes):
+            class_counts[c] = (targets == c).sum().float()
+
+        class_counts = class_counts + self.epsilon
+
+        if self.weight_type == "inverse":
+            class_weights = 1.0 / class_counts
+            class_weights = class_weights * (num_classes / class_weights.sum())
+        elif self.weight_type == "effective":
+            # Effective number of samples (from "Class-Balanced Loss Based on Effective Number of Samples")
+            # https://arxiv.org/abs/1901.05555
+            effective_num = 1.0 - torch.pow(self.beta, class_counts)
+            class_weights = (1.0 - self.beta) / (effective_num + self.epsilon)
+            class_weights = class_weights / class_weights.sum() * num_classes
+        else:
+            class_weights = torch.ones_like(class_counts)
+
+        return class_weights
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """Forward pass.
+
+        Args:
+            inputs: Predicted logits [batch_size, num_classes]
+            targets: Ground truth labels [batch_size]
+
+        Returns:
+            Computed loss
+        """
+        num_classes = inputs.size(1)
+
+        # Compute class weights based on the batch
+        class_weights = self._compute_class_weights(targets, num_classes)
+        self.class_weights = class_weights  # Store for possible inspection
+
+        # Apply weighted cross entropy loss
+        loss = F.cross_entropy(inputs, targets, weight=class_weights, reduction=self.reduction)
+
+        return loss
+
+
 @LossRegistry.register("focal_loss")
 class FocalLoss(nn.Module):
     """Focal Loss.

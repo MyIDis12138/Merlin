@@ -221,7 +221,18 @@ class Normalize(BaseTransform):
 
 @TransformRegistry.register("ToTensor")
 class ToTensor(BaseTransform):
-    """Convert numpy array to PyTorch tensor"""
+    """Convert numpy array to PyTorch tensor with option to load directly to CUDA
+
+    Args:
+        device: Device to load tensor on ('cpu', 'cuda', 'cuda:0', etc.)
+              If None, tensor will be loaded to CPU.
+    """
+
+    def __init__(self, device: str | None = 'cpu'):
+        if device is not None:
+            self.device = torch.device(device)
+        else:
+            self.device = torch.device('cpu')
 
     def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
         images = x["images"]
@@ -232,13 +243,15 @@ class ToTensor(BaseTransform):
         if isinstance(images, np.ndarray):
             # Convert to contiguous array and then to tensor
             images = np.ascontiguousarray(images)
-            x["images"] = torch.from_numpy(images).float()
-
+            x["images"] = torch.from_numpy(images).float().to(self.device)
+        elif isinstance(images, torch.Tensor):
+            # Just move existing tensor to device
+            x["images"] = images.to(self.device)
+            
         return x
 
     def __repr__(self) -> str:
-        return "ToTensor()"
-
+        return f"ToTensor_MONAI(device={self.device})"
 
 @TransformRegistry.register("RandomBiasField")
 class RandomBiasField(BaseTransform):

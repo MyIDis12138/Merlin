@@ -1,10 +1,11 @@
 
 ## dataset & dataloading problem
+- [ ] Enable async GPU data processing and training
 - [ ] Load checkpoints before training
-- [ ] Verify by visualizing the image after pre-processing
+- [x] Verify by visualizing the image after pre-processing
 - [ ] enlarge the dataset with more data source
 - [ ] set expriments for training on 2D
-- [ ] Improve the loading efficiency
+- [x] Improve the loading efficiency: speed up with monai
 - [x] Apply pre-trained model from [Med3D models](https://github.com/Tencent/MedicalNet)
 - [x] Data agumentation in pre-processing pipeline with [torchio](https://github.com/TorchIO-project/torchio)
     - [x] random rotation within 60 degrees

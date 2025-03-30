@@ -6,13 +6,13 @@ ln -s /storage/ice1/shared/bmed6780/mip_group_5 data
 ```
 
 ### dependencies installation
-
+install with pip
 ```
 pip install -e . --index-url https://download.pytorch.org/whl/cu121
 pip install -e .[dev]
 ```
 
-uv install [recommended]
+install with uv [recommended]
 ```
 curl -LsSf https://astral.sh/uv/install.sh | sh
 cd ECE6780_project_group5
@@ -29,3 +29,6 @@ uv pip install -e .[dev]
 source .venv/bin/activate
 python src/run.py configs/config.yaml
 ```
+
+### Training tips
+- Currently only have serial data processing and training for GPU support. To enbale GPU for data processing, set global_num_workers=0 and pin_memory: false.

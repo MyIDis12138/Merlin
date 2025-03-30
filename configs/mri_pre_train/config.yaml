@@ -2,7 +2,7 @@ imports:
   - logging.yaml
   - model.yaml
   - training.yaml
-  - dataset_monai.yaml
+  - dataset.yaml
   - runner.yaml
 
 environment:

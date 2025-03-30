@@ -2,401 +2,127 @@ from typing import Any
 
 import numpy as np
 import torch
-import torch.nn.functional as F
+from monai.transforms import (
+    RandBiasField,
+    RandFlip,
+    RandGaussianNoise,
+    RandGibbsNoise,
+    Resize as MonaiResize,
+)
 
 from .transform_registry import BaseTransform, TransformRegistry
 
 
-@TransformRegistry.register("ResizeXY")
-class ResizeXY(BaseTransform):
-    """Resize the X and Y dimensions of all images to target size using bicubic interpolation.
+@TransformRegistry.register("Resize")
+class Resize(BaseTransform):
+    """Resize the X, Y, and Z dimensions of all images to target size using MONAI.
 
     Works with both numpy arrays, PyTorch tensors, and lists of numpy arrays.
 
     Args:
-        target_size (Union[Tuple[int, int], int]): Target size for X and Y dimensions.
-            Can be a tuple (width, height) or a single int for square images.
-        mode (str): Interpolation mode. Default is 'bicubic'.
-            Options for torch: 'nearest', 'linear', 'bilinear', 'bicubic', 'trilinear'
-            Options for numpy: 'nearest', 'linear', 'area', 'cubic'
+        target_size (Union[tuple[int, int, int], int]): Target size for (Z, X, Y) dimensions.
+            Can be a tuple (depth, height, width) or a single int for cubic volumes.
+        mode (str): Interpolation mode. Default is 'bilinear'.
+            Options: 'nearest', 'linear', 'bilinear', 'bicubic', 'trilinear', etc.
+        align_corners (bool): Whether to align corners when using interpolation modes
+            that support this option. Default is False.
     """
 
-    def __init__(self, target_size: tuple[int, int] | int = 512, mode: str = "bicubic"):
+    def __init__(self, target_size: tuple[int, int, int] | int = 256, mode: str = "bilinear", align_corners: bool = False):
         if isinstance(target_size, int):
-            self.target_size = (target_size, target_size)
+            self.target_size = (target_size, target_size, target_size)
         else:
             self.target_size = target_size
         self.mode = mode
+        self.align_corners = None if mode == "nearest" else align_corners
 
     def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
         images = x["images"]
 
-        # New case: List of numpy arrays
+        # list of numpy arrays
         if isinstance(images, list):
-            import cv2
-
-            # Process each array in the list separately
             resized_list = []
             for img_array in images:
                 if not isinstance(img_array, np.ndarray):
                     raise TypeError(f"Expected numpy array in list, got {type(img_array)}")
 
-                # Get the shape of the current array
+                # Convert to tensor
                 if img_array.ndim == 4:  # If array has format [C, Z, X, Y]
-                    C, Z, _, _ = img_array.shape
-                    resized_array = np.zeros((C, Z, self.target_size[0], self.target_size[1]), dtype=img_array.dtype)
-
-                    # Map PyTorch interpolation modes to OpenCV interpolation flags
-                    mode_map = {
-                        "nearest": cv2.INTER_NEAREST,
-                        "linear": cv2.INTER_LINEAR,
-                        "bilinear": cv2.INTER_LINEAR,
-                        "bicubic": cv2.INTER_CUBIC,
-                        "area": cv2.INTER_AREA,
-                    }
-
-                    interpolation = mode_map.get(self.mode, cv2.INTER_CUBIC)
-
-                    # Resize each slice
-                    for c in range(C):
-                        for z in range(Z):
-                            resized_array[c, z] = cv2.resize(
-                                img_array[c, z],
-                                (self.target_size[1], self.target_size[0]),  # OpenCV expects (width, height)
-                                interpolation=interpolation,
-                            )
-
-                    resized_list.append(resized_array)
+                    tensor = torch.from_numpy(img_array).float()
                 else:
-                    # Handle other dimensionalities as needed
-                    # For example, if you have [Z, X, Y] format:
-                    Z, _, _ = img_array.shape
-                    resized_array = np.zeros((Z, self.target_size[0], self.target_size[1]), dtype=img_array.dtype)
+                    # Handle 3D case [Z, X, Y] by adding channel dimension
+                    tensor = torch.from_numpy(img_array).float().unsqueeze(0)
 
-                    mode_map = {
-                        "nearest": cv2.INTER_NEAREST,
-                        "linear": cv2.INTER_LINEAR,
-                        "bilinear": cv2.INTER_LINEAR,
-                        "bicubic": cv2.INTER_CUBIC,
-                        "area": cv2.INTER_AREA,
-                    }
+                # Resize the tensor
+                resized_tensor = self._resize_tensor(tensor)
 
-                    interpolation = mode_map.get(self.mode, cv2.INTER_CUBIC)
-
-                    for z in range(Z):
-                        resized_array[z] = cv2.resize(img_array[z], (self.target_size[1], self.target_size[0]), interpolation=interpolation)
-
-                    resized_list.append(resized_array)
+                # Convert back to numpy and match original dimensionality
+                if img_array.ndim == 4:
+                    resized_list.append(resized_tensor.numpy())
+                else:
+                    resized_list.append(resized_tensor.squeeze(0).numpy())
 
             x["images"] = resized_list
 
         elif isinstance(images, torch.Tensor):
-            # PyTorch tensor case: (C, Z, X, Y)
-            C, Z, _, _ = images.shape
-
-            # Reshape to merge C and Z dimensions for 2D resizing
-            reshaped = images.reshape(C * Z, 1, images.shape[2], images.shape[3])
-
-            # Resize using F.interpolate (handles batched 2D images)
-            if self.mode == "bicubic":
-                # Using align_corners=False as the default behavior
-                resized = F.interpolate(reshaped, size=self.target_size, mode="bicubic", align_corners=False)
-            else:
-                align_corners = None if self.mode == "nearest" else False
-                resized = F.interpolate(reshaped, size=self.target_size, mode=self.mode, align_corners=align_corners)
-
-            # Reshape back to original format
-            x["images"] = resized.reshape(C, Z, self.target_size[0], self.target_size[1])
-
-        else:
-            # NumPy array case
-            import cv2
-
-            C, Z, _, _ = images.shape
-            resized_images = np.zeros((C, Z, self.target_size[0], self.target_size[1]), dtype=images.dtype)
-
-            # Map PyTorch interpolation modes to OpenCV interpolation flags
-            mode_map = {
-                "nearest": cv2.INTER_NEAREST,
-                "linear": cv2.INTER_LINEAR,
-                "bilinear": cv2.INTER_LINEAR,
-                "bicubic": cv2.INTER_CUBIC,
-                "area": cv2.INTER_AREA,
-            }
-
-            interpolation = mode_map.get(self.mode, cv2.INTER_CUBIC)
-
-            # Resize each slice
-            for c in range(C):
-                for z in range(Z):
-                    resized_images[c, z] = cv2.resize(
-                        images[c, z], (self.target_size[1], self.target_size[0]), interpolation=interpolation  # OpenCV expects (width, height)
-                    )
-
-            x["images"] = resized_images
-
-        return x
-
-    def __repr__(self) -> str:
-        return f"ResizeXY(target_size={self.target_size}, mode='{self.mode}')"
-
-
-@TransformRegistry.register("ResampleZ")
-class ResampleZ(BaseTransform):
-    """Resample the Z-dimension (number of slices) of all volumes to a fixed number.
-
-    Works with PyTorch tensors, numpy arrays, and lists of numpy arrays.
-
-    Args:
-        target_slices (int): Target number of slices in Z dimension
-        mode (str): Interpolation mode. Default is 'linear'.
-            Options for torch: 'nearest', 'linear', 'bilinear', 'trilinear'
-            Options for numpy: 'nearest', 'linear'
-        center_around_median (bool): If True, centers the resampling around the median slice.
-            If False, resamples the entire volume uniformly. Default is True.
-    """
-
-    def __init__(self, target_slices: int = 174, mode: str = "linear", center_around_median: bool = True):
-        self.target_slices = target_slices
-        self.mode = mode
-        self.center_around_median = center_around_median
-
-    def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
-        images = x["images"]
-
-        # New case: List of numpy arrays
-        if isinstance(images, list):
-            resampled_list = []
-
-            for img_array in images:
-                if not isinstance(img_array, np.ndarray):
-                    raise TypeError(f"Expected numpy array in list, got {type(img_array)}")
-
-                # Get the shape and determine how to process
-                if img_array.ndim == 4:  # [C, Z, X, Y] format
-                    C, Z, H, W = img_array.shape
-
-                    if Z == self.target_slices:
-                        # No resampling needed
-                        resampled_list.append(img_array)
-                        continue
-
-                    if self.center_around_median and Z > 1:
-                        # Find the median slice index
-                        median_slice = Z // 2
-
-                        # Calculate start and end indices to center around median
-                        if self.target_slices >= Z:
-                            # Upsampling: use the full range and interpolate
-                            resampled = self._resample_numpy(img_array, self.target_slices)
-                        else:
-                            # Downsampling: take a centered subset and then interpolate if needed
-                            half_target = self.target_slices // 2
-                            start = max(0, median_slice - half_target)
-                            end = min(Z, start + self.target_slices)
-
-                            # Adjust start if end hit the boundary
-                            if end == Z:
-                                start = max(0, Z - self.target_slices)
-
-                            subset = img_array[:, start:end]
-                            if subset.shape[1] != self.target_slices:
-                                resampled = self._resample_numpy(subset, self.target_slices)
-                            else:
-                                resampled = subset
-                    else:
-                        # Resample the entire Z dimension uniformly
-                        resampled = self._resample_numpy(img_array, self.target_slices)
-
-                    resampled_list.append(resampled)
-                else:
-                    # Handle [Z, X, Y] format
-                    Z, H, W = img_array.shape
-
-                    if Z == self.target_slices:
-                        resampled_list.append(img_array)
-                        continue
-
-                    if self.center_around_median and Z > 1:
-                        median_slice = Z // 2
-
-                        if self.target_slices >= Z:
-                            # Expand dimension to [1, Z, H, W] for resampling then squeeze back
-                            expanded = np.expand_dims(img_array, axis=0)
-                            resampled = self._resample_numpy(expanded, self.target_slices)
-                            resampled = np.squeeze(resampled, axis=0)
-                        else:
-                            half_target = self.target_slices // 2
-                            start = max(0, median_slice - half_target)
-                            end = min(Z, start + self.target_slices)
-
-                            if end == Z:
-                                start = max(0, Z - self.target_slices)
-
-                            subset = img_array[start:end]
-                            if subset.shape[0] != self.target_slices:
-                                # Expand dimension for resampling then squeeze back
-                                expanded = np.expand_dims(subset, axis=0)
-                                resampled = self._resample_numpy(expanded, self.target_slices)
-                                resampled = np.squeeze(resampled, axis=0)
-                            else:
-                                resampled = subset
-                    else:
-                        # Expand dimension for resampling then squeeze back
-                        expanded = np.expand_dims(img_array, axis=0)
-                        resampled = self._resample_numpy(expanded, self.target_slices)
-                        resampled = np.squeeze(resampled, axis=0)
-
-                    resampled_list.append(resampled)
-
-            x["images"] = resampled_list
-
-        elif isinstance(images, torch.Tensor):
             # PyTorch tensor case
-            C, Z, H, W = images.shape
-
-            if Z == self.target_slices:
-                return x  # No resampling needed
-
-            if self.center_around_median and Z > 1:
-                # Find the median slice index
-                median_slice = Z // 2
-
-                # Calculate start and end indices to center around median
-                if self.target_slices >= Z:
-                    # Upsampling: use the full range and interpolate
-                    resampled = self._resample_torch(images, self.target_slices)
-                else:
-                    # Downsampling: take a centered subset and then interpolate if needed
-                    half_target = self.target_slices // 2
-                    start = max(0, median_slice - half_target)
-                    end = min(Z, start + self.target_slices)
-
-                    # Adjust start if end hit the boundary
-                    if end == Z:
-                        start = max(0, Z - self.target_slices)
-
-                    subset = images[:, start:end]
-                    if subset.shape[1] != self.target_slices:
-                        resampled = self._resample_torch(subset, self.target_slices)
-                    else:
-                        resampled = subset
-            else:
-                # Resample the entire Z dimension uniformly
-                resampled = self._resample_torch(images, self.target_slices)
-
-            x["images"] = resampled
+            x["images"] = self._resize_tensor(images)
 
         else:
             # NumPy array case
-            C, Z, H, W = images.shape
-
-            if Z == self.target_slices:
-                return x  # No resampling needed
-
-            if self.center_around_median and Z > 1:
-                # Find the median slice index
-                median_slice = Z // 2
-
-                # Calculate start and end indices to center around median
-                if self.target_slices >= Z:
-                    # Upsampling: use the full range and interpolate
-                    resampled = self._resample_numpy(images, self.target_slices)
-                else:
-                    # Downsampling: take a centered subset and then interpolate if needed
-                    half_target = self.target_slices // 2
-                    start = max(0, median_slice - half_target)
-                    end = min(Z, start + self.target_slices)
-
-                    # Adjust start if end hit the boundary
-                    if end == Z:
-                        start = max(0, Z - self.target_slices)
-
-                    subset = images[:, start:end]
-                    if subset.shape[1] != self.target_slices:
-                        resampled = self._resample_numpy(subset, self.target_slices)
-                    else:
-                        resampled = subset
-            else:
-                # Resample the entire Z dimension uniformly
-                resampled = self._resample_numpy(images, self.target_slices)
-
-            x["images"] = resampled
+            tensor = torch.from_numpy(images).float()
+            resized_tensor = self._resize_tensor(tensor)
+            x["images"] = resized_tensor.numpy()
 
         return x
 
-    def _resample_torch(self, images: torch.Tensor, target_slices: int) -> torch.Tensor:
-        """Helper method to resample PyTorch tensor in Z dimension."""
-        C, Z, H, W = images.shape
+    def _resize_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Resize a tensor using MONAI transforms.
 
-        # Reshape to format expected by F.interpolate: [B, C, D]
-        reshaped = images.reshape(C, Z, H * W).permute(0, 2, 1)
+        Args:
+            tensor: Input tensor of shape [C, Z, X, Y]
 
-        # Use 1D interpolation for Z dimension
-        if self.mode == "nearest":
-            resampled = F.interpolate(reshaped, size=target_slices, mode="nearest")
-        else:
-            # For 1D interpolation, we use linear (which is 1D)
-            resampled = F.interpolate(reshaped, size=target_slices, mode="linear", align_corners=False)
+        Returns:
+            Resized tensor
+        """
+        # MONAI's Resize expects spatial_size in (H, W, D) order
+        # Our target_size is in (Z, X, Y) order, so we need to reorder
+        monai_spatial_size = (self.target_size[1], self.target_size[2], self.target_size[0])
 
-        # Reshape back to original format: [C, Z, H, W]
-        return resampled.permute(0, 2, 1).reshape(C, target_slices, H, W)
+        # Create and apply MONAI resize transform
+        resize_transform = MonaiResize(spatial_size=monai_spatial_size, mode=self.mode, align_corners=self.align_corners)
 
-    def _resample_numpy(self, images: np.ndarray, target_slices: int) -> np.ndarray:
-        """Helper method to resample NumPy array in Z dimension."""
-        from scipy.ndimage import zoom
-
-        # Handle the dimensionality of the input array
-        if images.ndim == 4:  # [C, Z, H, W] format
-            C, Z, H, W = images.shape
-
-            # Calculate zoom factor for Z dimension
-            z_factor = target_slices / Z
-
-            # Create output array
-            resampled = np.zeros((C, target_slices, H, W), dtype=images.dtype)
-
-            # Apply zoom for each channel
-            for c in range(C):
-                if self.mode == "nearest":
-                    resampled[c] = zoom(images[c], (z_factor, 1, 1), order=0)
-                else:
-                    # Linear interpolation
-                    resampled[c] = zoom(images[c], (z_factor, 1, 1), order=1)
-        elif images.ndim == 3:  # [Z, H, W] format
-            Z, H, W = images.shape
-
-            # Calculate zoom factor for Z dimension
-            z_factor = target_slices / Z
-
-            # Apply zoom directly
-            if self.mode == "nearest":
-                resampled = zoom(images, (z_factor, 1, 1), order=0)
-            else:
-                resampled = zoom(images, (z_factor, 1, 1), order=1)
-        else:
-            raise ValueError(f"Unsupported array shape with dimensions: {images.ndim}")
-
-        return resampled
+        return resize_transform(tensor)
 
     def __repr__(self) -> str:
-        return f"ResampleZ(target_slices={self.target_slices}, mode='{self.mode}', center_around_median={self.center_around_median})"
+        return f"Resize(target_size={self.target_size}, mode='{self.mode}', align_corners={self.align_corners})"
 
 
 @TransformRegistry.register("Normalize")
 class Normalize(BaseTransform):
-    """Normalize the input data to a specified range
+    """Normalize the input data to a specified range using MONAI.
 
     Args:
         range_min (float): Minimum value of the target range
         range_max (float): Maximum value of the target range
-        percentiles (Tuple[float, float], optional): Percentiles for computing normalization range
+        percentiles (tuple[float, float], optional): Percentiles for computing normalization range
+        nonzero (bool): Whether to only normalize non-zero values
+        channel_wise (bool): Whether to normalize each channel independently
     """
 
-    def __init__(self, range_min: float = -1.0, range_max: float = 1.0, percentiles: tuple[float, float] | None = None):
+    def __init__(
+        self,
+        range_min: float = -1.0,
+        range_max: float = 1.0,
+        percentiles: tuple[float, float] | None = None,
+        nonzero: bool = False,
+        channel_wise: bool = False,
+    ):
         self.range_min = range_min
         self.range_max = range_max
         self.percentiles = percentiles
+        self.nonzero = nonzero
+        self.channel_wise = channel_wise
 
     def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
         images = x["images"]
@@ -405,39 +131,92 @@ class Normalize(BaseTransform):
             images_scaled = self.normalize(images)
         elif isinstance(images, list):
             images_scaled = [self.normalize(image) for image in images]
+        else:
+            # NumPy array case
+            tensor = torch.from_numpy(images).float()
+            images_scaled = self.normalize(tensor).numpy()
 
         x["images"] = images_scaled
         return x
 
     def normalize(self, image):
-        if isinstance(image, torch.Tensor):
-            image = image.float()
-            if self.percentiles is not None:
-                min_val = torch.quantile(image, self.percentiles[0] / 100)
-                max_val = torch.quantile(image, self.percentiles[1] / 100)
-            else:
-                min_val = image.min()
-                max_val = image.max()
-        elif isinstance(image, np.ndarray):
-            image = image.astype(np.float32)
-            if self.percentiles is not None:
-                min_val = np.percentile(image, self.percentiles[0])
-                max_val = np.percentile(image, self.percentiles[1])
-            else:
-                min_val = image.min()
-                max_val = image.max()
+        """Normalize input tensor with custom implementation."""
+        if isinstance(image, np.ndarray):
+            image = torch.from_numpy(image).float()
+            is_numpy = True
+        else:
+            is_numpy = False
 
-        # Avoid division by zero
-        if max_val == min_val:
-            image_scaled = image * 0 + self.range_min
-            return image_scaled
+        # Work with a copy to avoid modifying the original
+        result = image.clone()
 
-        image_scaled = (image - min_val) / (max_val - min_val)
-        image_scaled = image_scaled * (self.range_max - self.range_min) + self.range_min
-        return image_scaled
+        # Function to normalize a single tensor
+        def _normalize_tensor(t):
+            # Handle empty or constant tensors
+            if t.numel() == 0 or (t.max() - t.min()) < 1e-7:
+                return t
+
+            # Get normalization bounds
+            if self.percentiles is not None:
+                # Convert percentiles from 0-100 range to 0-1 range for torch.quantile
+                low_pct, high_pct = self.percentiles[0] / 100.0, self.percentiles[1] / 100.0
+                min_val = torch.quantile(t.flatten(), low_pct)
+                max_val = torch.quantile(t.flatten(), high_pct)
+            else:
+                if self.nonzero:
+                    # Only consider non-zero values
+                    mask = t != 0
+                    if mask.sum() > 0:  # Ensure there are non-zero values
+                        masked_t = t[mask]
+                        min_val = masked_t.min()
+                        max_val = masked_t.max()
+                    else:
+                        min_val, max_val = t.min(), t.max()
+                else:
+                    min_val, max_val = t.min(), t.max()
+
+            # Apply normalization
+            norm_range = max_val - min_val
+            if norm_range > 1e-7:  # Avoid division by very small values
+                if self.nonzero:
+                    # Only normalize non-zero values
+                    mask = t != 0
+                    if mask.sum() > 0:
+                        t_normalized = t.clone()
+                        t_normalized[mask] = (t_normalized[mask] - min_val) / norm_range
+                        t_normalized[mask] = t_normalized[mask] * (self.range_max - self.range_min) + self.range_min
+                        return t_normalized
+
+                # Standard normalization
+                t_normalized = (t - min_val) / norm_range
+                t_normalized = t_normalized * (self.range_max - self.range_min) + self.range_min
+                return t_normalized
+            else:
+                # If range is too small, just set to range_min
+                return torch.full_like(t, self.range_min)
+
+        # Apply normalization
+        if self.channel_wise and image.dim() >= 3:
+            # Normalize each channel independently
+            if image.dim() == 3:  # [C, H, W]
+                for c in range(image.shape[0]):
+                    result[c] = _normalize_tensor(image[c])
+            elif image.dim() == 4:  # [C, D, H, W]
+                for c in range(image.shape[0]):
+                    result[c] = _normalize_tensor(image[c])
+        else:
+            # Normalize whole image
+            result = _normalize_tensor(image)
+
+        # Convert back to numpy if input was numpy
+        if is_numpy:
+            result = result.numpy()
+
+        return result
 
     def __repr__(self) -> str:
-        return f"Normalize(range=({self.range_min}, {self.range_max}), percentiles={self.percentiles})"
+        return f"Normalize(range=({self.range_min}, {self.range_max}), percentiles={self.percentiles},\
+                 nonzero={self.nonzero}, channel_wise={self.channel_wise})"
 
 
 @TransformRegistry.register("ToTensor")
@@ -447,15 +226,238 @@ class ToTensor(BaseTransform):
     def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
         images = x["images"]
         if isinstance(images, list):
+            # Stack list of numpy arrays
             images = np.stack(images, axis=0)
 
         if isinstance(images, np.ndarray):
+            # Convert to contiguous array and then to tensor
             images = np.ascontiguousarray(images)
-            x["images"] = torch.from_numpy(images)
+            x["images"] = torch.from_numpy(images).float()
+
         return x
 
     def __repr__(self) -> str:
         return "ToTensor()"
+
+
+@TransformRegistry.register("RandomBiasField")
+class RandomBiasField(BaseTransform):
+    """Apply random MRI bias field artifact using MONAI.
+
+    Args:
+        coeff_range (tuple[float, float]): Range of bias field coefficients
+        prob (float): Probability of applying the transform
+    """
+
+    def __init__(self, coeff_range: float | tuple[float, float] = 0.3, prob: float = 1.0):
+        # Convert scalar to range if needed
+        if isinstance(coeff_range, (int, float)):
+            self.coeff_range = (0.0, float(coeff_range))
+        else:
+            self.coeff_range = coeff_range
+        self.prob = prob
+        self.transform = RandBiasField(coeff_range=self.coeff_range, prob=self.prob)
+
+    def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
+        images = x["images"]
+
+        if isinstance(images, list):
+            processed_list = []
+            for img in images:
+                if isinstance(img, np.ndarray):
+                    tensor = torch.from_numpy(img).float()
+                    processed = self.transform(tensor)
+                    processed_list.append(processed.numpy())
+                else:
+                    processed = self.transform(img)
+                    processed_list.append(processed)
+            x["images"] = processed_list
+        elif isinstance(images, np.ndarray):
+            tensor = torch.from_numpy(images).float()
+            x["images"] = self.transform(tensor).numpy()
+        else:
+            # Already a tensor
+            x["images"] = self.transform(images)
+
+        return x
+
+    def __repr__(self) -> str:
+        return f"RandomBiasField(coeff_range={self.coeff_range}, prob={self.prob})"
+
+
+@TransformRegistry.register("RandomNoise")
+class RandomNoise(BaseTransform):
+    """Apply random noise using MONAI.
+
+    Args:
+        mean (float): Mean value of Gaussian noise
+        std (float or tuple[float, float]): Standard deviation or range of standard deviations
+        prob (float): Probability of applying the transform
+    """
+
+    def __init__(self, mean: float = 0.0, std: float | tuple[float, float] = 0.1, prob: float = 1.0):
+        self.mean = mean
+        self.prob = prob
+
+        # Store the original std parameter
+        self.std_param = std
+
+        # For MONAI transform initialization, we'll use a single float value
+        # The actual range handling will be done in our custom implementation
+        if isinstance(std, (tuple, list)):
+            std_value = sum(std) / 2  # Use average as default
+        else:
+            std_value = float(std)
+
+        self.transform = RandGaussianNoise(mean=self.mean, std=std_value, prob=self.prob)
+
+    def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
+        images = x["images"]
+
+        # Handle different input types
+        if isinstance(images, list):
+            processed_list = []
+            for img in images:
+                if isinstance(img, np.ndarray):
+                    tensor = torch.from_numpy(img).float()
+                    processed = self._apply_noise(tensor)
+                    processed_list.append(processed.numpy())
+                else:
+                    processed = self._apply_noise(img)
+                    processed_list.append(processed)
+            x["images"] = processed_list
+        elif isinstance(images, np.ndarray):
+            tensor = torch.from_numpy(images).float()
+            x["images"] = self._apply_noise(tensor).numpy()
+        else:
+            # Already a tensor
+            x["images"] = self._apply_noise(images)
+
+        return x
+
+    def _apply_noise(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Apply Gaussian noise manually to avoid broadcasting issues."""
+        # Skip if random chance is below probability threshold
+        if torch.rand(1).item() > self.prob:
+            return tensor
+
+        # Determine std value - either use the given value or sample from range
+        if isinstance(self.std_param, (tuple, list)):
+            low, high = self.std_param
+            std = torch.rand(1).item() * (high - low) + low
+        else:
+            std = float(self.std_param)
+
+        # Generate noise with same shape as input tensor
+        noise = torch.randn_like(tensor) * std + self.mean
+
+        # Add noise to tensor
+        return tensor + noise
+
+    def __repr__(self) -> str:
+        return f"RandomNoise(mean={self.mean}, std={self.std_param}, prob={self.prob})"
+
+
+@TransformRegistry.register("RandomMotion")
+class RandomMotion(BaseTransform):
+    """Simulate random motion artifacts using MONAI Gibbs noise.
+
+    Note: MONAI doesn't have a direct equivalent to TorchIO's RandomMotion,
+          so we use RandGibbsNoise which produces somewhat similar artifacts.
+
+    Args:
+        prob (float): Probability of applying the transform
+        num_transforms (int): Number of transforms to apply
+    """
+
+    def __init__(self, prob: float = 1.0, num_transforms: int = 2):
+        self.prob = prob
+        self.num_transforms = num_transforms
+        self.transform = RandGibbsNoise(prob=self.prob)
+
+    def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
+        images = x["images"]
+
+        if isinstance(images, list):
+            processed_list = []
+            for img in images:
+                if isinstance(img, np.ndarray):
+                    tensor = torch.from_numpy(img).float()
+                    processed = self._apply_multiple(tensor)
+                    processed_list.append(processed.numpy())
+                else:
+                    processed = self._apply_multiple(img)
+                    processed_list.append(processed)
+            x["images"] = processed_list
+        elif isinstance(images, np.ndarray):
+            tensor = torch.from_numpy(images).float()
+            x["images"] = self._apply_multiple(tensor).numpy()
+        else:
+            # Already a tensor
+            x["images"] = self._apply_multiple(images)
+
+        return x
+
+    def _apply_multiple(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Apply the transform multiple times to simulate more complex motion."""
+        result = tensor
+        for _ in range(self.num_transforms):
+            result = self.transform(result)
+        return result
+
+    def __repr__(self) -> str:
+        return f"RandomMotion(prob={self.prob}, num_transforms={self.num_transforms})"
+
+
+@TransformRegistry.register("RandomFlip")
+class RandomFlip(BaseTransform):
+    """Apply random flip using MONAI.
+
+    Args:
+        axes (int or tuple[int, ...]): Axes along which to flip
+        flip_probability (float): Probability of applying the transform
+    """
+
+    def __init__(self, axes: int | tuple[int, ...] = 0, flip_probability: float = 0.5):
+        self.axes = axes
+        self.flip_probability = flip_probability
+
+        # Convert axes to MONAI format (spatial_axis)
+        if isinstance(self.axes, int):
+            # Convert single axis to MONAI format
+            # Note: MONAI uses different indexing for spatial dimensions in transforms
+            monai_axis = self.axes
+            # Adjust if needed based on your expected input format
+            self.transform = RandFlip(prob=self.flip_probability, spatial_axis=monai_axis)
+        else:
+            # Multiple axes
+            self.transform = RandFlip(prob=self.flip_probability, spatial_axis=self.axes)
+
+    def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
+        images = x["images"]
+
+        if isinstance(images, list):
+            processed_list = []
+            for img in images:
+                if isinstance(img, np.ndarray):
+                    tensor = torch.from_numpy(img).float()
+                    processed = self.transform(tensor)
+                    processed_list.append(processed.numpy())
+                else:
+                    processed = self.transform(img)
+                    processed_list.append(processed)
+            x["images"] = processed_list
+        elif isinstance(images, np.ndarray):
+            tensor = torch.from_numpy(images).float()
+            x["images"] = self.transform(tensor).numpy()
+        else:
+            # Already a tensor
+            x["images"] = self.transform(images)
+
+        return x
+
+    def __repr__(self) -> str:
+        return f"RandomFlip(axes={self.axes}, flip_probability={self.flip_probability})"
 
 
 class MRITransformPipeline:
@@ -467,7 +469,6 @@ class MRITransformPipeline:
     Example:
         >>> transform = MRITransformPipeline([
         ...     Normalize(range_min=0, range_max=1, percentiles=(1, 99)),
-        ...     CropOrPad(target_size=(256, 256, 32)),
         ...     RandomFlip(flip_prob=0.5, dims=[1, 2]),
         ...     ToTensor()
         ... ])

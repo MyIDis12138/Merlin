@@ -305,7 +305,8 @@ class ClinicalDataMLP:
         numerical_cols = []
         categorical_cols = []
 
-        col_mapping_flat_to_original = {flat: orig for flat, orig in zip(self.X.columns, original_X_columns)}
+        # Create a mapping from flat column names to original multi-level columns
+        self.column_mapping = {flat: orig for flat, orig in zip(self.X.columns, original_X_columns)}
 
         for i, col in enumerate(self.X.columns):
             original_col_tuple = original_X_columns[i]
@@ -337,10 +338,31 @@ class ClinicalDataMLP:
             self.X[categorical_cols] = cat_imputer.fit_transform(self.X[categorical_cols])
             logger.info("Imputed missing values in categorical columns with 'Missing'.")
 
-            # One-hot encode categorical columns
+            # Store the mapping for categorical features before one-hot encoding
+            categorical_mapping = {}
+            for cat_col in categorical_cols:
+                original_col = self.column_mapping[cat_col]
+                unique_vals = self.X[cat_col].unique()
+                for val in unique_vals:
+                    # Create mappings for the one-hot encoded columns that will be created
+                    encoded_col = f"{cat_col}_{val}"
+                    categorical_mapping[encoded_col] = (original_col, val)
+
             self.X = pd.get_dummies(self.X, columns=categorical_cols, drop_first=True, dummy_na=False, dtype=int)
             logger.info("Applied one-hot encoding to categorical columns.")
             logger.info(f"Data shape after encoding: {self.X.shape}")
+
+            # Update the column mapping with the one-hot encoded columns
+            for encoded_col in self.X.columns:
+                if encoded_col in self.column_mapping:
+                    continue  # Skip columns that already have a mapping
+
+                # Try to find the base column name
+                for cat_col in categorical_cols:
+                    if encoded_col.startswith(cat_col + "_"):
+                        value = encoded_col[len(cat_col) + 1 :]
+                        self.column_mapping[encoded_col] = (self.column_mapping[cat_col], value)
+                        break
 
             # Clean column names for compatibility
             logger.info("Cleaning column names for MLP compatibility...")
@@ -348,9 +370,20 @@ class ClinicalDataMLP:
             self.X.columns = self.X.columns.str.replace("[\[\]<]", "_", regex=True)
             cleaned_cols = self.X.columns.tolist()
 
+            # Update column mapping after cleaning column names
+            cleaned_mapping = {}
+            for orig, clean in zip(original_cols, cleaned_cols):
+                if orig in self.column_mapping:
+                    cleaned_mapping[clean] = self.column_mapping[orig]
+
+            self.column_mapping = cleaned_mapping
+
             changed_cols = [(orig, clean) for orig, clean in zip(original_cols, cleaned_cols) if orig != clean]
             if changed_cols:
                 logger.info(f"Cleaned {len(changed_cols)} column names.")
+
+        # Store feature names before conversion to tensors
+        self.feature_names = self.X.columns
 
         # Final check for non-numeric columns
         non_numeric_cols = self.X.select_dtypes(exclude=np.number).columns
@@ -649,7 +682,7 @@ class ClinicalDataMLP:
 
         return True
 
-    def get_feature_importance(self, top_n=20, plot=True):
+    def get_feature_importance(self, top_n=20, plot=True, preserve_original_columns=True):
         """
         Get and optionally plot feature importance for PyTorch MLP.
 
@@ -659,6 +692,7 @@ class ClinicalDataMLP:
         Args:
             top_n (int): Number of top features to show.
             plot (bool): Whether to generate a plot.
+            preserve_original_columns (bool): Whether to map feature names back to original multi-index columns.
 
         Returns:
             pd.DataFrame: DataFrame of feature importances.
@@ -693,8 +727,32 @@ class ClinicalDataMLP:
             feature_importance = baseline_score - score_permuted
             importance.append(feature_importance)
 
-        # Create DataFrame with feature importances
-        importance_df = pd.DataFrame({"Feature": self.feature_names, "Importance": importance})
+        flat_feature_names = self.feature_names
+
+        # Map flat feature names to original multi-level columns
+        if preserve_original_columns:
+            # We need to store a column mapping during data preparation
+            if hasattr(self, "column_mapping"):
+                # Use the stored mapping
+                original_feature_names = []
+                for flat_name in flat_feature_names:
+                    # If this is a one-hot encoded column, get the base column
+                    if "_" in flat_name and flat_name.rsplit("_", 1)[-1].isdigit():
+                        base_col = flat_name.rsplit("_", 1)[0]
+                        if base_col in self.column_mapping:
+                            original_feature_names.append((self.column_mapping[base_col], flat_name))
+                        else:
+                            original_feature_names.append(flat_name)
+                    else:
+                        original_feature_names.append(self.column_mapping.get(flat_name, flat_name))
+
+                # Create DataFrame with both original and flat column names
+                importance_df = pd.DataFrame({"Feature": flat_feature_names, "Original_Feature": original_feature_names, "Importance": importance})
+            else:
+                logger.warning("Column mapping not found. Using flat feature names.")
+                importance_df = pd.DataFrame({"Feature": flat_feature_names, "Importance": importance})
+        else:
+            importance_df = pd.DataFrame({"Feature": flat_feature_names, "Importance": importance})
 
         # Sort by importance
         importance_df = importance_df.sort_values(by="Importance", ascending=False)
@@ -705,7 +763,8 @@ class ClinicalDataMLP:
         if plot:
             try:
                 plt.figure(figsize=(10, 8))
-                sns.barplot(x="Importance", y="Feature", data=importance_df.head(top_n))
+                plot_data = importance_df.head(top_n)
+                sns.barplot(x="Importance", y="Feature", data=plot_data)
                 plt.title(f"Top {top_n} Feature Importances (MLP - Permutation Method)")
                 plt.tight_layout()
                 plt.show()
@@ -744,7 +803,7 @@ if __name__ == "__main__":
         "TARGET_COLUMN": ("Recurrence", "Recurrence event(s)", "{0 = no, 1 = yes}"),
         "TEST_SIZE": 0.20,
         "N_FOLDS": 5,
-        "N_OPTUNA_TRIALS": 50,
+        "N_OPTUNA_TRIALS": 5,
         "RANDOM_STATE": 42,
         "TOP_N": 64,
         "FILTER_DICT": {0: ["Recurrence", "Follow Up", "US features"]},

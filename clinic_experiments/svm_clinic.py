@@ -1,4 +1,5 @@
 import logging
+import os
 import warnings
 
 import matplotlib.pyplot as plt
@@ -479,7 +480,13 @@ if __name__ == "__main__":
         "RANDOM_STATE": 42,
         "TOP_N": 64,
         "FILTER_DICT": {0: ["Recurrence", "Follow Up", "US features"]},
-        "EXCLUDE_COLUMNS": [("Tumor Characteristics", "Staging(Tumor Size)# [T]", ""), ("Mammography Characteristics", "Tumor Size (cm)", "")],
+        "EXCLUDE_COLUMNS": [
+            ("Tumor Characteristics", "Staging(Tumor Size)# [T]", ""),
+            ("Mammography Characteristics", "Tumor Size (cm)", ""),
+            ("MRI Technical Information", "Image Position of Patient", ""),
+            ("Patient Information", "Patient ID", ""),
+            ("Tumor Characteristics", "Position", "Position (every bx positive for invasive cancer)(used during annotation)"),
+        ],
     }
 
     model = ClinicalDataSVM(
@@ -496,4 +503,7 @@ if __name__ == "__main__":
     model.run_pipeline()
 
     feature_importances = model.get_feature_importance(CONFIG["TOP_N"])
-    feature_importances.to_csv("work_dirs/clinical_experiments/svm_clinic_FI.csv")
+
+    save_path = "work_dirs/clinical_experiments"
+    os.makedirs(save_path, exist_ok=True)
+    feature_importances.to_csv(os.path.join(save_path, "svm_clinic_FI.csv"))

@@ -21,6 +21,7 @@ dependencies = [
     "pandas>=2.2.0",
     "openpyxl>=3.1.2",
     "monai==1.4.0",
+    "xgboost==3.0.0",
     "scipy",
     "tqdm",
     "tensorboard",

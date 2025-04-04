@@ -56,7 +56,7 @@ where = ["src"]
 
 [tool.flake8]
 max-line-length = 150
-exclude = [".git", "__pycache__", ".venv", "build", "dist", ".mypy_cache", "notebooks/*"]
+exclude = [".git", "__pycache__", ".venv", "build", "dist", ".mypy_cache", "notebooks/*", "clinic_experiments/*"]
 ignore = ["W503", "TYP001", "E203"]
 
 

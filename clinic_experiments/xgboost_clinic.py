@@ -6,7 +6,7 @@ import numpy as np
 import optuna
 import pandas as pd
 import seaborn as sns
-from sklearn.ensemble import RandomForestClassifier
+import xgboost as xgb
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.model_selection import StratifiedKFold, train_test_split
@@ -14,13 +14,14 @@ from sklearn.model_selection import StratifiedKFold, train_test_split
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 pd.options.mode.chained_assignment = None
 
 
-class ClinicalDataRandomForest:
-    """A class to handle loading, processing, and modeling clinical data with Random Forest."""
+class ClinicalDataXgboost:
+    """A class to handle loading, processing, and modeling clinical data."""
 
     def __init__(
         self,
@@ -32,6 +33,7 @@ class ClinicalDataRandomForest:
         n_folds=5,
         n_optuna_trials=50,
         random_state=42,
+        use_gpu=True,
     ):
         """
         Initialize the model with configuration parameters.
@@ -43,6 +45,7 @@ class ClinicalDataRandomForest:
             n_folds (int): Number of cross-validation folds.
             n_optuna_trials (int): Number of Optuna trials for hyperparameter search.
             random_state (int): Random seed for reproducibility.
+            use_gpu (bool): Whether to use GPU acceleration if available.
         """
         self.clinical_data_path = clinical_data_path
         self.target_column = target_column
@@ -52,6 +55,7 @@ class ClinicalDataRandomForest:
         self.n_folds = n_folds
         self.n_optuna_trials = n_optuna_trials
         self.random_state = random_state
+        self.use_gpu = use_gpu
 
         self.df = None
         self.X = None
@@ -68,6 +72,7 @@ class ClinicalDataRandomForest:
         Load clinical data from an Excel file with a multi-index header.
         """
         try:
+
             self.df = pd.read_excel(self.clinical_data_path, header=[0, 1, 2])
 
             new_cols = []
@@ -269,7 +274,7 @@ class ClinicalDataRandomForest:
             logger.info("Applied one-hot encoding to categorical columns.")
             logger.info(f"Data shape after encoding: {self.X.shape}")
 
-            logger.info("Cleaning column names...")
+            logger.info("Cleaning column names for XGBoost compatibility...")
             original_cols = self.X.columns.tolist()
             self.X.columns = self.X.columns.str.replace("[\[\]<]", "_", regex=True)
             cleaned_cols = self.X.columns.tolist()
@@ -321,20 +326,34 @@ class ClinicalDataRandomForest:
         def objective(trial):
 
             params = {
+                "objective": "binary:logistic",
+                "eval_metric": "logloss",
+                "booster": trial.suggest_categorical("booster", ["gbtree", "dart"]),
+                "lambda": trial.suggest_float("lambda", 1e-8, 1.0, log=True),
+                "alpha": trial.suggest_float("alpha", 1e-8, 1.0, log=True),
                 "n_estimators": trial.suggest_int("n_estimators", 50, 1000),
-                "max_depth": trial.suggest_int("max_depth", 3, 30),
-                "min_samples_split": trial.suggest_int("min_samples_split", 2, 20),
-                "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 10),
-                "max_features": trial.suggest_categorical("max_features", ["sqrt", "log2", None]),
-                "bootstrap": trial.suggest_categorical("bootstrap", [True, False]),
+                "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+                "max_depth": trial.suggest_int("max_depth", 3, 9),
+                "subsample": trial.suggest_float("subsample", 0.5, 1.0),
+                "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
+                "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
+                "gamma": trial.suggest_float("gamma", 1e-8, 1.0, log=True),
+                "use_label_encoder": False,
                 "random_state": self.random_state,
-                "class_weight": "balanced",
+                "early_stopping_rounds": 50,
             }
 
-            if params["bootstrap"]:
-                params["max_samples"] = trial.suggest_float("max_samples", 0.5, 1.0)
+            if self.use_gpu:
+                params["tree_method"] = "gpu_hist"
+                params["gpu_id"] = 0
 
-            model = RandomForestClassifier(**params)
+            if params["booster"] == "dart":
+                params["sample_type"] = trial.suggest_categorical("sample_type", ["uniform", "weighted"])
+                params["normalize_type"] = trial.suggest_categorical("normalize_type", ["tree", "forest"])
+                params["rate_drop"] = trial.suggest_float("rate_drop", 1e-8, 0.5, log=True)
+                params["skip_drop"] = trial.suggest_float("skip_drop", 1e-8, 0.5, log=True)
+
+            model = xgb.XGBClassifier(**params)
 
             cv = StratifiedKFold(n_splits=self.n_folds, shuffle=True, random_state=self.random_state)
             f1_scores = []
@@ -343,7 +362,7 @@ class ClinicalDataRandomForest:
                 X_train_fold, X_val_fold = self.X_train.iloc[train_idx], self.X_train.iloc[val_idx]
                 y_train_fold, y_val_fold = self.y_train.iloc[train_idx], self.y_train.iloc[val_idx]
 
-                model.fit(X_train_fold, y_train_fold)
+                model.fit(X_train_fold, y_train_fold, eval_set=[(X_val_fold, y_val_fold)], verbose=False)
 
                 preds = model.predict(X_val_fold)
                 f1 = f1_score(y_val_fold, preds, average="binary")
@@ -363,7 +382,7 @@ class ClinicalDataRandomForest:
 
         logger.info(f"Running Optuna optimization with {self.n_optuna_trials} trials...")
 
-        study = optuna.create_study(direction="maximize", study_name="random_forest_clinical_recurrence")
+        study = optuna.create_study(direction="maximize", study_name="xgboost_clinical_recurrence")
 
         study.optimize(self._get_optuna_objective(), n_trials=self.n_optuna_trials, show_progress_bar=True)
 
@@ -376,12 +395,23 @@ class ClinicalDataRandomForest:
         logger.info("Training final model with best parameters...")
 
         final_params = self.best_params.copy()
+        final_params["early_stopping_rounds"] = 50
+        final_params["objective"] = "binary:logistic"
+        final_params["eval_metric"] = "logloss"
+        final_params["use_label_encoder"] = False
         final_params["random_state"] = self.random_state
-        final_params["class_weight"] = "balanced"
 
-        self.final_model = RandomForestClassifier(**final_params)
+        if self.use_gpu:
+            final_params["tree_method"] = "gpu_hist"
+            final_params["gpu_id"] = 0
 
-        self.final_model.fit(self.X_train, self.y_train)
+        self.final_model = xgb.XGBClassifier(**final_params)
+
+        X_train_final, X_eval_final, y_train_final, y_eval_final = train_test_split(
+            self.X_train, self.y_train, test_size=0.1, random_state=self.random_state, stratify=self.y_train
+        )
+
+        self.final_model.fit(X_train_final, y_train_final, eval_set=[(X_eval_final, y_eval_final)], verbose=False)
 
         logger.info("Final model trained successfully.")
         return True
@@ -439,7 +469,7 @@ class ClinicalDataRandomForest:
             try:
                 plt.figure(figsize=(10, 8))
                 sns.barplot(x="Importance", y="Feature", data=importance_df.head(top_n))
-                plt.title(f"Top {top_n} Feature Importances (Random Forest)")
+                plt.title(f"Top {top_n} Feature Importances (XGBoost)")
                 plt.tight_layout()
                 plt.show()
             except Exception as e:
@@ -466,76 +496,8 @@ class ClinicalDataRandomForest:
         if not self.evaluate():
             return False
 
-        self.get_feature_importance()
-
         logger.info("Pipeline completed successfully!")
         return True
-
-    def get_tree_depth_analysis(self, plot=True):
-        """
-        Analyze the depth of trees in the random forest.
-
-        Args:
-            plot (bool): Whether to generate a visualization.
-
-        Returns:
-            pd.DataFrame: DataFrame with tree depth analysis.
-        """
-        if self.final_model is None:
-            logger.error("No trained model. Call tune_and_train() first.")
-            return None
-
-        tree_depths = []
-        for tree in self.final_model.estimators_:
-            tree_depths.append(tree.get_depth())
-
-        depth_analysis = {
-            "min_depth": min(tree_depths),
-            "max_depth": max(tree_depths),
-            "mean_depth": np.mean(tree_depths),
-            "median_depth": np.median(tree_depths),
-        }
-
-        logger.info("Tree Depth Analysis:")
-        for metric, value in depth_analysis.items():
-            logger.info(f"  {metric}: {value:.2f}")
-
-        depth_counts = pd.Series(tree_depths).value_counts().sort_index()
-
-        if plot:
-            try:
-                plt.figure(figsize=(10, 6))
-                sns.histplot(tree_depths, kde=True)
-                plt.title("Distribution of Tree Depths in Random Forest")
-                plt.xlabel("Tree Depth")
-                plt.ylabel("Count")
-                plt.axvline(x=np.mean(tree_depths), color="r", linestyle="--", label=f"Mean: {np.mean(tree_depths):.2f}")
-                plt.legend()
-                plt.tight_layout()
-                plt.show()
-            except Exception as e:
-                logger.warning(f"Error generating plot: {e}")
-
-        return pd.DataFrame({"Tree Depth": depth_counts.index, "Count": depth_counts.values})
-
-    def get_oob_score(self):
-        """
-        Calculate out-of-bag (OOB) score if bootstrap was used.
-
-        Returns:
-            float: OOB score or None if not applicable.
-        """
-        if self.final_model is None:
-            logger.error("No trained model. Call tune_and_train() first.")
-            return None
-
-        if hasattr(self.final_model, "oob_score_"):
-            oob_score = self.final_model.oob_score_
-            logger.info(f"Out-of-bag (OOB) score: {oob_score:.4f}")
-            return oob_score
-        else:
-            logger.info("OOB score not available. Model was trained without bootstrap or oob_score=True.")
-            return None
 
 
 if __name__ == "__main__":
@@ -547,13 +509,16 @@ if __name__ == "__main__":
         "N_FOLDS": 5,
         "N_OPTUNA_TRIALS": 50,
         "RANDOM_STATE": 42,
+        "TOP_N": 64,
         "FILTER_DICT": {0: ["Recurrence", "Follow Up", "US features"]},
+        "EXCLUDE_COLUMNS": [("Tumor Characteristics", "Staging(Tumor Size)# [T]", ""), ("Mammography Characteristics", "Tumor Size (cm)", "")],
     }
 
-    model = ClinicalDataRandomForest(
+    model = ClinicalDataXgboost(
         clinical_data_path=CONFIG["CLINICAL_DATA_PATH"],
         target_column=CONFIG["TARGET_COLUMN"],
         filter_dict=CONFIG["FILTER_DICT"],
+        exclude_columns=CONFIG["EXCLUDE_COLUMNS"],
         test_size=CONFIG["TEST_SIZE"],
         n_folds=CONFIG["N_FOLDS"],
         n_optuna_trials=CONFIG["N_OPTUNA_TRIALS"],
@@ -562,5 +527,5 @@ if __name__ == "__main__":
 
     model.run_pipeline()
 
-    model.get_tree_depth_analysis()
-    model.get_oob_score()
+    feature_importances = model.get_feature_importance(CONFIG["TOP_N"])
+    feature_importances.to_csv("work_dirs/clinical_experiments/xgb_clinic_FI.csv")

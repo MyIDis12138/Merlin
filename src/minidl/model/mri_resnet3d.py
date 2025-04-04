@@ -21,8 +21,8 @@ class ResNet3DMRIModel(nn.Module):
         n_classes: int = 2,
         pretrained: bool = False,
         pretrained_model: str = "",
-        d_model: int = 512,
         out_dropout: float = 0.3,
+        **kwargs,
     ):
         super().__init__()
         self.backbone = backbone
@@ -49,15 +49,10 @@ class ResNet3DMRIModel(nn.Module):
 
         self.shared_extractor = self.backbone
 
-        self.mri_adapters = nn.ModuleList(
-            [nn.Sequential(nn.Conv3d(feature_dim, d_model, kernel_size=1), nn.BatchNorm3d(d_model), nn.ReLU(inplace=True)) for _ in range(3)]
+        self.avgpool = nn.AdaptiveAvgPool3d((1, 1, 1))
+        self.classifier = nn.Sequential(
+            nn.Linear(feature_dim * 3, feature_dim * 2), nn.GELU(), nn.Dropout(out_dropout), nn.Linear(feature_dim * 2, n_classes)
         )
-
-        self.spatial_attention = nn.Sequential(
-            nn.AdaptiveAvgPool3d(1), nn.Conv3d(d_model, d_model // 2, 1), nn.GELU(), nn.Conv3d(d_model // 2, d_model, 1), nn.Sigmoid()
-        )
-
-        self.classifier = nn.Sequential(nn.Linear(d_model * 3, d_model * 2), nn.GELU(), nn.Dropout(out_dropout), nn.Linear(d_model * 2, n_classes))
 
     def _load_pretrained_weights(self, pretrained_path: str):
         """Load pretrained weights from a file"""
@@ -95,16 +90,12 @@ class ResNet3DMRIModel(nn.Module):
 
             feat = self.shared_extractor.forward_features(mri)
 
-            feat = self.mri_adapters[i](feat)
-
-            attn = self.spatial_attention(feat)
-            feat = feat * attn
-
-            feat = F.adaptive_avg_pool3d(feat, 1).squeeze(-1).squeeze(-1).squeeze(-1)  # [B, d_model]
             features.append(feat)
 
         combined_features = torch.cat(features, dim=1)  # [B, d_model*3]
 
+        combined_features = self.avgpool(combined_features)
+        combined_features = torch.flatten(combined_features, 1)
         logits = self.classifier(combined_features)
 
         return logits

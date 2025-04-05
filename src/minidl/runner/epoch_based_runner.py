@@ -338,16 +338,8 @@ class EpochBasedRunner(BaseRunner):
                 val_metrics = self.val_epoch()
                 self.logger.info(f"Epoch {epoch}/{self.max_epochs}, Val metrics: {val_metrics}")
 
-                if self.config.get("save_best", True):
-                    if val_metrics["loss"] < self.best_val_metric:
-                        self.best_val_metric = val_metrics["loss"]
-                        self.save_checkpoint("best_model", {"epoch": epoch, "metrics": val_metrics})
-
             if self.scheduler is not None:
                 self.scheduler.step()
-
-            if (epoch + 1) % self.config.get("checkpoint_interval", 10) == 0:
-                self.save_checkpoint(f"epoch_{epoch}", {"epoch": epoch, "metrics": train_metrics})
 
         self.call_hooks("after_train")
 

@@ -46,6 +46,7 @@ def deep_merge(dict1, dict2):
 
 def load_config(config_path):
     """Load and merge configuration files."""
+
     # Add a constructor for scientific notation
     def scientific_constructor(loader, node):
         value = loader.construct_scalar(node)
@@ -53,15 +54,15 @@ def load_config(config_path):
             return float(value)
         except ValueError:
             return value
-    
-    yaml.SafeLoader.add_constructor('tag:yaml.org,2002:str', scientific_constructor)
-    
+
+    yaml.SafeLoader.add_constructor("tag:yaml.org,2002:str", scientific_constructor)
+
     with open(config_path, "r") as f:
         config = yaml.load(f, Loader=yaml.SafeLoader) or {}
-    
+
     # Get the directory of the main config file
     config_dir = os.path.dirname(config_path)
-    
+
     # Load and merge imported configs
     if "imports" in config:
         for import_path in config["imports"]:
@@ -73,9 +74,9 @@ def load_config(config_path):
             except FileNotFoundError:
                 print(f"Warning: Could not find config file {import_path}")
                 continue
-        
+
         del config["imports"]
-    
+
     return config
 
 
@@ -225,9 +226,13 @@ def main():
         # Create runner using factory
         runner = RunnerBuilder.build_runner(config, device)
 
+        runner.call_hooks("before_run")
+
         # Run experiment
         logger.info(f"Starting experiment with runner: {config['runner']['name']}")
         runner.run()
+
+        runner.call_hooks("after_run")
 
         logger.info("Experiment completed successfully.")
 

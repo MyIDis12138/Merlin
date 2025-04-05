@@ -1,3 +1,4 @@
+import glob
 import os
 from collections.abc import Callable
 from typing import Any
@@ -247,7 +248,7 @@ class CheckpointHook(Hook):
     def before_train(self, runner):
         """Initialize checkpoint directory."""
         if self.out_dir is None:
-            self.out_dir = runner.work_dir
+            self.out_dir = os.path.join(runner.work_dir, "checkpoints")
         os.makedirs(self.out_dir, exist_ok=True)
 
     def after_train_epoch(self, runner):
@@ -368,7 +369,7 @@ class WandbLoggerHook(Hook):
         self.grad_norm_window = grad_norm_window
         self.recent_grad_norms = []  # type: ignore
 
-    def before_train(self, runner):
+    def before_run(self, runner):
         """Initialize wandb run before the runner starts."""
         # Update config with runner's config if available
         if hasattr(runner, "config") and runner.config is not None:
@@ -578,6 +579,162 @@ class EarlyStoppingHook(Hook):
                 runner.logger.info(f"Early stopping triggered after {runner.current_epoch + 1} epochs")
                 # Set max_epochs to current epoch to stop training
                 runner.max_epochs = runner.current_epoch + 1
+
+
+@HookRegistry.register("checkpoint_loader_hook")
+class CheckpointLoaderHook(Hook):
+    """Hook for loading model checkpoints from a file or directory.
+
+    This hook loads a model checkpoint before training. If a directory is provided,
+    it will find the latest checkpoint file in that directory. If a file is provided,
+    it will load that specific checkpoint file.
+
+    Attributes:
+        checkpoint_path (str): Path to a checkpoint file or directory containing checkpoint files
+        strict (bool): Whether to strictly enforce that the keys in state_dict match the keys
+                      returned by this module's state_dict()
+        map_location (str, optional): Device to map tensors to when loading the checkpoint
+        load_optimizer (bool): Whether to load optimizer state
+        load_scheduler (bool): Whether to load scheduler state
+        priority (int): Priority of the hook
+    """
+
+    def __init__(
+        self,
+        checkpoint_path: str,
+        enable=True,
+        strict: bool = True,
+        map_location: str | None = None,
+        load_optimizer: bool = True,
+        load_scheduler: bool = True,
+        priority: int = 0,
+    ):
+        """Initialize the hook.
+
+        Args:
+            checkpoint_path: Path to checkpoint file or directory containing checkpoint files
+            enable: whether enable checkpoint loading.
+            strict: Whether to strictly enforce that the keys in state_dict match the keys
+                   returned by this module's state_dict()
+            map_location: Device to map tensors to when loading the checkpoint
+            load_optimizer: Whether to load optimizer state
+            load_scheduler: Whether to load scheduler state
+            priority: Priority of the hook
+        """
+        super().__init__(priority)
+        self.checkpoint_path = checkpoint_path
+        self.strict = strict
+        self.map_location = map_location
+        self.load_optimizer = load_optimizer
+        self.load_scheduler = load_scheduler
+        self.enable = enable
+
+    def _find_latest_checkpoint(self, dir_path: str) -> str | None:
+        """Find the latest checkpoint file in the directory.
+
+        Args:
+            dir_path: Directory path to search for checkpoint files
+
+        Returns:
+            Path to the latest checkpoint file, or None if no checkpoint files found
+        """
+        checkpoint_files = []
+
+        # Look for epoch_*.pth files
+        epoch_files = glob.glob(os.path.join(dir_path, "epoch_*.pth"))
+        checkpoint_files.extend(epoch_files)
+
+        # Also look for best_model.pth files
+        best_model_path = os.path.join(dir_path, "best_model.pth")
+        if os.path.exists(best_model_path):
+            checkpoint_files.append(best_model_path)
+
+        # Look for other .pth files as a fallback
+        if not checkpoint_files:
+            checkpoint_files = glob.glob(os.path.join(dir_path, "*.pth"))
+
+        if not checkpoint_files:
+            return None
+
+        # Sort files by modification time (latest first)
+        checkpoint_files.sort(key=os.path.getmtime, reverse=True)
+
+        return checkpoint_files[0]
+
+    def before_train(self, runner):
+        """Load checkpoint before the runner starts.
+
+        Args:
+            runner: Runner instance
+        """
+        if not self.enable:
+            runner.logger.info("Skipping checkpoint loading")
+            return
+
+        if not self.checkpoint_path:
+            runner.logger.warning("No checkpoint path provided, skipping checkpoint loading")
+            return
+
+        # Determine the actual checkpoint path
+        if os.path.isdir(self.checkpoint_path):
+            checkpoint_path = self._find_latest_checkpoint(os.path.join(self.checkpoint_path, "checkpoints"))
+            if not checkpoint_path:
+                runner.logger.warning(f"No checkpoint files found in {self.checkpoint_path}")
+                return
+            runner.logger.info(f"Using latest checkpoint: {checkpoint_path}")
+        else:
+            checkpoint_path = self.checkpoint_path
+            if not os.path.isfile(checkpoint_path):
+                runner.logger.warning(f"Checkpoint file not found: {checkpoint_path}")
+                return
+
+        # Load the checkpoint
+        try:
+            map_location = self.map_location
+            if map_location is None and hasattr(runner, "device"):
+                map_location = runner.device
+
+            checkpoint = torch.load(checkpoint_path, map_location=map_location)
+
+            # Load model state
+            if "model" in checkpoint:
+                if runner.model is not None:
+                    runner.model.load_state_dict(checkpoint["model"], strict=self.strict)
+                    runner.logger.info(f"Loaded model state from {checkpoint_path}")
+                else:
+                    runner.logger.warning("Cannot load model state: model is None")
+            else:
+                runner.logger.warning(f"Checkpoint does not contain model state: {checkpoint_path}")
+
+            # Load optimizer state if requested
+            if self.load_optimizer and "optimizer" in checkpoint and runner.optimizer is not None:
+                runner.optimizer.load_state_dict(checkpoint["optimizer"])
+                runner.logger.info(f"Loaded optimizer state from {checkpoint_path}")
+
+            # Load scheduler state if requested
+            if self.load_scheduler and "scheduler" in checkpoint and runner.scheduler is not None:
+                runner.scheduler.load_state_dict(checkpoint["scheduler"])
+                runner.logger.info(f"Loaded scheduler state from {checkpoint_path}")
+
+            # Load epoch/iteration info if available
+            if "epoch" in checkpoint and hasattr(runner, "current_epoch"):
+                runner.current_epoch = checkpoint["epoch"]
+                runner.logger.info(f"Resuming from epoch {runner.current_epoch}")
+
+            if "iter" in checkpoint and hasattr(runner, "iter"):
+                runner.iter = checkpoint["iter"]
+                runner.logger.info(f"Resuming from iteration {runner.iter}")
+
+            # Load additional metadata
+            for key, value in checkpoint.items():
+                if key not in ["model", "optimizer", "scheduler", "epoch", "iter", "config"]:
+                    setattr(runner, f"loaded_{key}", value)
+
+            runner.logger.info(f"Successfully loaded checkpoint from {checkpoint_path}")
+
+        except Exception as e:
+            runner.logger.error(f"Failed to load checkpoint: {e}")
+            raise
 
 
 class HookBuilder:

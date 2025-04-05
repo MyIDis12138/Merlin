@@ -3,6 +3,12 @@ runner:
   max_epochs: 100
 
   hooks:
+    - name: "checkpoint_loader_hook"
+      params:
+        checkpoint_path: "work_dirs/experiments/recurrance_dmodel_256_lr1e5"
+        strict: true
+        enable: true
+
     - name: "tensorboard_logger_hook"
       params:
         log_dir: "logs"

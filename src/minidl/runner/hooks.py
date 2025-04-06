@@ -203,8 +203,8 @@ class TensorboardLoggerHook(Hook):
             self.writer.close()
 
 
-@HookRegistry.register("checkpoint_hook")
-class CheckpointHook(Hook):
+@HookRegistry.register("checkpoint_saver_hook")
+class CheckpointSaverHook(Hook):
     """Hook for saving checkpoints."""
 
     def __init__(

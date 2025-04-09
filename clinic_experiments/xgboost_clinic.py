@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import warnings
@@ -12,7 +13,14 @@ from sklearn.impute import SimpleImputer
 from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.model_selection import StratifiedKFold, train_test_split
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+save_path = "work_dirs/clinical_experiments/xgboost"
+os.makedirs(save_path, exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[logging.FileHandler(os.path.join(save_path, "xgboost_model.log")), logging.StreamHandler()],  # This keeps console output
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 
@@ -360,20 +368,19 @@ class ClinicalDataXgboost:
 
             params = {
                 "objective": "binary:logistic",
-                "eval_metric": "logloss",
+                "eval_metric": "aucpr",  # Or perhaps 'aucpr' for evaluation during training
+                "scale_pos_weight": self.calculated_scale_pos_weight,
                 "booster": trial.suggest_categorical("booster", ["gbtree", "dart"]),
                 "lambda": trial.suggest_float("lambda", 1e-8, 1.0, log=True),
                 "alpha": trial.suggest_float("alpha", 1e-8, 1.0, log=True),
-                "n_estimators": trial.suggest_int("n_estimators", 50, 1000),
-                "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
-                "max_depth": trial.suggest_int("max_depth", 3, 9),
+                "n_estimators": trial.suggest_int("n_estimators", 100, 300),
+                "learning_rate": trial.suggest_float("learning_rate", 1e-3, 0.1, log=True),
+                "max_depth": trial.suggest_int("max_depth", 3, 10),
                 "subsample": trial.suggest_float("subsample", 0.5, 1.0),
                 "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
                 "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
-                "gamma": trial.suggest_float("gamma", 1e-8, 1.0, log=True),
+                "gamma": trial.suggest_float("gamma", 1e-8, 0.2, log=True),
                 "use_label_encoder": False,
-                "random_state": self.random_state,
-                "early_stopping_rounds": 50,
             }
 
             if self.use_gpu:
@@ -383,8 +390,8 @@ class ClinicalDataXgboost:
             if params["booster"] == "dart":
                 params["sample_type"] = trial.suggest_categorical("sample_type", ["uniform", "weighted"])
                 params["normalize_type"] = trial.suggest_categorical("normalize_type", ["tree", "forest"])
-                params["rate_drop"] = trial.suggest_float("rate_drop", 1e-8, 0.5, log=True)
-                params["skip_drop"] = trial.suggest_float("skip_drop", 1e-8, 0.5, log=True)
+                params["rate_drop"] = trial.suggest_float("rate_drop", 1e-6, 0.3, log=True)
+                params["skip_drop"] = trial.suggest_float("skip_drop", 1e-6, 0.3, log=True)
 
             model = xgb.XGBClassifier(**params)
 
@@ -413,6 +420,16 @@ class ClinicalDataXgboost:
             logger.error("Training data not split. Call split_data() first.")
             return False
 
+        # Calculate scale_pos_weight from the training data
+        neg_count = np.sum(self.y_train == 0)
+        pos_count = np.sum(self.y_train == 1)
+        if pos_count > 0:
+            self.calculated_scale_pos_weight = neg_count / pos_count
+            logger.info(f"Calculated scale_pos_weight for imbalance: {self.calculated_scale_pos_weight:.4f}")
+        else:
+            logger.warning("No positive instances in training data for scale_pos_weight calculation. Using default 1.")
+            self.calculated_scale_pos_weight = 1
+
         logger.info(f"Running Optuna optimization with {self.n_optuna_trials} trials...")
 
         study = optuna.create_study(direction="maximize", study_name="xgboost_clinical_recurrence")
@@ -431,6 +448,7 @@ class ClinicalDataXgboost:
         final_params["early_stopping_rounds"] = 50
         final_params["objective"] = "binary:logistic"
         final_params["eval_metric"] = "logloss"
+        final_params["scale_pos_weight"] = self.calculated_scale_pos_weight
         final_params["use_label_encoder"] = False
         final_params["random_state"] = self.random_state
 
@@ -470,6 +488,148 @@ class ClinicalDataXgboost:
 
         logger.info("Test Set Classification Report:")
         print(classification_report(self.y_test, y_pred_test))
+
+        return True
+
+    def evaluate_with_cross_validation(self):
+        """
+        Train, validate, and test the model using cross-validation.
+        For each fold, train a model, evaluate on validation set, and evaluate on the test set.
+        This allows comparison between validation and test performance.
+        """
+        if self.X is None or self.y is None:
+            logger.error("Features and target not prepared. Call prepare_data() first.")
+            return False
+
+        logger.info("Evaluating model with cross-validation...")
+
+        # Extract best parameters from Optuna tuning
+        if self.best_params is None:
+            logger.error("No best parameters found. Call tune_and_train() first.")
+            return False
+
+        # Set up cross-validation
+        cv = StratifiedKFold(n_splits=self.n_folds, shuffle=True, random_state=self.random_state)
+
+        # Arrays to store results
+        fold_results = []
+
+        fold_count = 1
+
+        # For each fold
+        for train_idx, val_idx in cv.split(self.X_train, self.y_train):
+            logger.info(f"Training and evaluating fold {fold_count}/{self.n_folds}")
+
+            X_train_fold = self.X_train.iloc[train_idx]
+            X_val_fold = self.X_train.iloc[val_idx]
+            y_train_fold = self.y_train.iloc[train_idx]
+            y_val_fold = self.y_train.iloc[val_idx]
+
+            fold_params = self.best_params.copy()
+            fold_params["early_stopping_rounds"] = 50
+            fold_params["objective"] = "binary:logistic"
+            fold_params["eval_metric"] = "logloss"
+            fold_params["use_label_encoder"] = False
+            fold_params["random_state"] = self.random_state
+
+            if self.use_gpu:
+                fold_params["tree_method"] = "gpu_hist"
+                fold_params["gpu_id"] = 0
+
+            fold_model = xgb.XGBClassifier(**fold_params)
+
+            fold_model.fit(X_train_fold, y_train_fold, eval_set=[(X_val_fold, y_val_fold)], verbose=False)
+
+            # Validation evaluation
+            val_preds = fold_model.predict(X_val_fold)
+            val_f1 = f1_score(y_val_fold, val_preds, average="binary")
+            val_accuracy = accuracy_score(y_val_fold, val_preds)
+
+            # Test evaluation
+            test_preds = fold_model.predict(self.X_test)
+            test_f1 = f1_score(self.y_test, test_preds, average="binary")
+            test_accuracy = accuracy_score(self.y_test, test_preds)
+
+            fold_results.append(
+                {"fold": fold_count, "val_f1": val_f1, "val_accuracy": val_accuracy, "test_f1": test_f1, "test_accuracy": test_accuracy}
+            )
+
+            logger.info(f"Fold {fold_count} - Val F1: {val_f1:.4f}, Test F1: {test_f1:.4f}")
+
+            fold_count += 1
+
+        # Convert results to DataFrame
+        results_df = pd.DataFrame(fold_results)
+
+        # Save results
+        results_df.to_csv(os.path.join(save_path, "cross_validation_results.csv"), index=False)
+
+        # Calculate average performance
+        avg_val_f1 = results_df["val_f1"].mean()
+        avg_test_f1 = results_df["test_f1"].mean()
+
+        logger.info(f"Average validation F1: {avg_val_f1:.4f}")
+        logger.info(f"Average test F1: {avg_test_f1:.4f}")
+
+        # Create validation vs test performance plot
+        self._plot_val_vs_test_performance(results_df)
+
+        return True
+
+    def _plot_val_vs_test_performance(self, results_df):
+        """
+        Create a plot comparing validation and test F1 scores.
+        Args:
+            results_df (pd.DataFrame): DataFrame with validation and test results.
+        """
+        try:
+            plt.figure(figsize=(10, 8))
+
+            # Plot validation F1 vs test F1
+            plt.scatter(results_df["val_f1"], results_df["test_f1"], s=100, alpha=0.7, c="blue", label="Folds")
+
+            # Add fold numbers as labels
+            for i, row in results_df.iterrows():
+                plt.text(row["val_f1"], row["test_f1"], f"  {row['fold']}", fontsize=12)
+
+            min_val = min(results_df["val_f1"].min(), results_df["test_f1"].min()) - 0.05
+            max_val = max(results_df["val_f1"].max(), results_df["test_f1"].max()) + 0.05
+            plt.plot([min_val, max_val], [min_val, max_val], "k--", alpha=0.5, label="Perfect correlation")
+
+            # Add mean point
+            plt.scatter([results_df["val_f1"].mean()], [results_df["test_f1"].mean()], s=200, c="red", marker="*", label="Mean")
+
+            # Add error bars for standard deviation
+            plt.errorbar(
+                results_df["val_f1"].mean(),
+                results_df["test_f1"].mean(),
+                xerr=results_df["val_f1"].std(),
+                yerr=results_df["test_f1"].std(),
+                fmt="none",
+                ecolor="red",
+                alpha=0.5,
+                capsize=5,
+            )
+
+            # Add labels and legend
+            plt.xlabel("Validation F1 Score", fontsize=14)
+            plt.ylabel("Test F1 Score", fontsize=14)
+            plt.title("Validation vs Test F1 Score Across Folds", fontsize=16)
+            plt.grid(True, alpha=0.3)
+            plt.legend(fontsize=12)
+
+            # Set equal axis limits
+            plt.xlim(min_val, max_val)
+            plt.ylim(min_val, max_val)
+
+            # Save the plot
+            plt.tight_layout()
+            plt.savefig(os.path.join(save_path, "val_vs_test_f1.png"))
+            logger.info(f"Plot saved to {os.path.join(save_path, 'val_vs_test_f1.png')}")
+            plt.close()
+
+        except Exception as e:
+            logger.error(f"Error creating plot: {e}")
 
         return True
 
@@ -553,6 +713,9 @@ class ClinicalDataXgboost:
         if not self.tune_and_train():
             return False
 
+        if not self.evaluate_with_cross_validation():
+            return False
+
         if not self.evaluate():
             return False
 
@@ -595,6 +758,7 @@ if __name__ == "__main__":
 
     feature_importances = model.get_feature_importance(CONFIG["TOP_N"])
 
-    save_path = "work_dirs/clinical_experiments"
-    os.makedirs(save_path, exist_ok=True)
     feature_importances.to_csv(os.path.join(save_path, "xgb_clinic_FI.csv"))
+
+    with open(os.path.join(save_path, "mlp_best_params"), "w") as f:
+        json.dump(model.best_params, f)

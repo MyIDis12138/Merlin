@@ -7,14 +7,14 @@
 ## model design improving
 - [ ] Expriments for training on [2D MRI](https://europepmc.org/article/MED/37370560)
 - [ ] Expriments for [tabular to image](https://github.com/zhuyitan/IGTD?tab=readme-ov-file)
+- [ ] Feature selecting for clinical features
 - [ ] Baseline cross validation with clinical data and MRI with Cross attention
 - [x] Apply pre-trained model from [Med3D models](https://github.com/Tencent/MedicalNet)
 
 ## dataset & dataloading problem
-- [ ] Enable async GPU data processing and training
-- [ ] Feature selecting for clinical features
 - [ ] Missing clinical data imputing in dataloading pipeline (simple way)
-- [ ] enlarge the dataset with more data source
+- [ ] Enlarge the dataset with more data source
+- [x] Enable async GPU data processing and training
 - [x] clinical data only experiments
 - [x] Verify by visualizing the image after pre-processing
 - [x] Improve the loading efficiency: speed up with monai

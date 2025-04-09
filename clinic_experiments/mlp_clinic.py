@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import warnings
@@ -16,7 +17,14 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+save_path = "work_dirs/clinical_experiments/mlp"
+os.makedirs(save_path, exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[logging.FileHandler(os.path.join(save_path, "mlp_model.log")), logging.StreamHandler()],  # This keeps console output
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 # Suppress warnings
@@ -431,7 +439,7 @@ class ClinicalDataMLP:
         Create and return the Optuna objective function for hyperparameter tuning with PyTorch.
         """
 
-        def objective(trial):
+        def objective(trial: optuna.Trial):
             # PyTorch MLP parameter space
             learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-1, log=True)
             weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-2, log=True)
@@ -441,10 +449,10 @@ class ClinicalDataMLP:
             optimizer_name = trial.suggest_categorical("optimizer", ["adam", "sgd"])
 
             # Define hidden layers
-            n_layers = trial.suggest_int("n_layers", 1, 3)
+            n_layers = trial.suggest_int("n_layers", 1, 5)
             n_units = []
             for i in range(n_layers):
-                n_units.append(trial.suggest_int(f"n_units_l{i}", 32, 512))
+                n_units.append(trial.suggest_categorical(f"n_units_l{i}", [32, 256, 512, 1024]))
 
             # Define input and output dimensions
             n_features = self.X_train.shape[1]
@@ -668,7 +676,7 @@ class ClinicalDataMLP:
         logger.info(f"Test Set F1 Score: {test_f1:.4f}")
 
         logger.info("Test Set Classification Report:")
-        print(classification_report(self.y_test, y_pred_test))
+        logger.info(classification_report(self.y_test, y_pred_test))
 
         # Create confusion matrix
         try:
@@ -679,6 +687,232 @@ class ClinicalDataMLP:
             plt.show()
         except Exception as e:
             logger.warning(f"Error generating confusion matrix: {e}")
+
+        return True
+
+    def evaluate_with_cross_validation(self):
+        """
+        Train, validate, and test the model using cross-validation.
+        For each fold, train a model, evaluate on validation set, and evaluate on the test set.
+        This allows comparison between validation and test performance.
+        """
+        if self.X is None or self.y is None:
+            logger.error("Features and target not prepared. Call prepare_data() first.")
+            return False
+
+        logger.info("Evaluating model with cross-validation...")
+
+        # Extract best parameters from Optuna tuning
+        if self.best_params is None:
+            logger.error("No best parameters found. Call tune_and_train() first.")
+            return False
+
+        # Extract model architecture parameters
+        n_features = self.X_train.shape[1]
+        n_layers = self.best_params["n_layers"]
+        hidden_sizes = [self.best_params[f"n_units_l{i}"] for i in range(n_layers)]
+        dropout_rate = self.best_params["dropout_rate"]
+        activation_fn = self.best_params["activation"]
+        learning_rate = self.best_params["learning_rate"]
+        weight_decay = self.best_params["weight_decay"]
+        optimizer_name = self.best_params["optimizer"]
+        batch_size = self.best_params["batch_size"]
+
+        # Set up cross-validation
+        cv = StratifiedKFold(n_splits=self.n_folds, shuffle=True, random_state=self.random_state)
+
+        # Arrays to store results
+        fold_results = []
+
+        # Fixed test set for all folds (this stays constant)
+        X_test_tensor = torch.FloatTensor(self.X_test).to(self.device)
+        y_test_tensor = torch.LongTensor(self.y_test.values).to(self.device)
+
+        fold_count = 1
+
+        # For each fold
+        for train_idx, val_idx in cv.split(self.X_train, self.y_train):
+            logger.info(f"Training and evaluating fold {fold_count}/{self.n_folds}")
+
+            # Convert indices to actual data
+            X_train_fold = self.X_train[train_idx]
+            X_val_fold = self.X_train[val_idx]
+            y_train_fold = self.y_train.iloc[train_idx].values
+            y_val_fold = self.y_train.iloc[val_idx].values
+
+            # Convert to PyTorch tensors
+            X_train_tensor = torch.FloatTensor(X_train_fold).to(self.device)
+            y_train_tensor = torch.LongTensor(y_train_fold).to(self.device)
+            X_val_tensor = torch.FloatTensor(X_val_fold).to(self.device)
+            y_val_tensor = torch.LongTensor(y_val_fold).to(self.device)
+
+            # Create data loaders
+            train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+            # Create model for this fold
+            fold_model = MLP(n_features, hidden_sizes, dropout_rate, activation_fn).to(self.device)
+
+            # Define loss function
+            criterion = nn.CrossEntropyLoss()
+
+            # Define optimizer
+            if optimizer_name == "adam":
+                optimizer = torch.optim.Adam(fold_model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+            else:  # sgd
+                optimizer = torch.optim.SGD(fold_model.parameters(), lr=learning_rate, momentum=0.9, weight_decay=weight_decay)
+
+            # Train the model for this fold
+            fold_model.train()
+            epochs = 200  # Maximum epochs
+            patience = 20  # Early stopping patience
+            best_val_loss = float("inf")
+            best_val_f1 = -0.00001
+            no_improve_epochs = 0
+            best_model_weights = None
+
+            for epoch in range(epochs):
+                # Training loop
+                fold_model.train()
+                train_loss = 0.0
+                for X_batch, y_batch in train_loader:
+                    # Forward pass
+                    outputs = fold_model(X_batch)
+                    loss = criterion(outputs, y_batch)
+
+                    # Backward and optimize
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+
+                    train_loss += loss.item() * X_batch.size(0)
+
+                train_loss = train_loss / len(train_dataset)
+
+                # Evaluate on validation set
+                fold_model.eval()
+                with torch.no_grad():
+                    val_outputs = fold_model(X_val_tensor)
+                    val_loss = criterion(val_outputs, y_val_tensor).item()
+                    val_preds = torch.argmax(val_outputs, dim=1).cpu().numpy()
+                    val_f1 = f1_score(y_val_fold, val_preds, average="binary")
+
+                if (epoch + 1) % 10 == 0:
+                    logger.info(
+                        f"Fold {fold_count} - Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val F1: {val_f1:.4f}"
+                    )
+
+                # Check early stopping based on validation F1 score
+                if val_f1 > best_val_f1:
+                    best_val_f1 = val_f1
+                    best_val_loss = val_loss
+                    no_improve_epochs = 0
+                    # Save best model weights
+                    best_model_weights = fold_model.state_dict().copy()
+                else:
+                    no_improve_epochs += 1
+                    if no_improve_epochs >= patience:
+                        logger.info(f"Early stopping at epoch {epoch+1}")
+                        break
+
+            # Load best model weights for this fold
+            fold_model.load_state_dict(best_model_weights)
+
+            # Final validation evaluation
+            fold_model.eval()
+            with torch.no_grad():
+                val_outputs = fold_model(X_val_tensor)
+                val_preds = torch.argmax(val_outputs, dim=1).cpu().numpy()
+                val_f1 = f1_score(y_val_fold, val_preds, average="binary")
+                val_accuracy = accuracy_score(y_val_fold, val_preds)
+
+            # Test evaluation
+            with torch.no_grad():
+                test_outputs = fold_model(X_test_tensor)
+                test_preds = torch.argmax(test_outputs, dim=1).cpu().numpy()
+                test_f1 = f1_score(self.y_test, test_preds, average="binary")
+                test_accuracy = accuracy_score(self.y_test, test_preds)
+
+            fold_results.append(
+                {"fold": fold_count, "val_f1": val_f1, "val_accuracy": val_accuracy, "test_f1": test_f1, "test_accuracy": test_accuracy}
+            )
+
+            logger.info(f"Fold {fold_count} - Val F1: {val_f1:.4f}, Test F1: {test_f1:.4f}")
+
+            fold_count += 1
+
+        # Convert results to DataFrame
+        results_df = pd.DataFrame(fold_results)
+
+        # Save results
+        results_df.to_csv(os.path.join(save_path, "cross_validation_results.csv"), index=False)
+
+        # Calculate average performance
+        avg_val_f1 = results_df["val_f1"].mean()
+        avg_test_f1 = results_df["test_f1"].mean()
+
+        logger.info(f"Average validation F1: {avg_val_f1:.4f}")
+        logger.info(f"Average test F1: {avg_test_f1:.4f}")
+
+        # Create validation vs test performance plot
+        self._plot_val_vs_test_performance(results_df)
+
+        return True
+
+    def _plot_val_vs_test_performance(self, results_df):
+        """
+        Create a plot comparing validation and test F1 scores.
+        Args:
+            results_df (pd.DataFrame): DataFrame with validation and test results.
+        """
+        try:
+            plt.figure(figsize=(10, 8))
+
+            # Plot validation F1 vs test F1
+            plt.scatter(results_df["val_f1"], results_df["test_f1"], s=100, alpha=0.7, c="blue", label="Folds")
+
+            # Add fold numbers as labels
+            for i, row in results_df.iterrows():
+                plt.text(row["val_f1"], row["test_f1"], f"  {row['fold']}", fontsize=12)
+
+            min_val = min(results_df["val_f1"].min(), results_df["test_f1"].min()) - 0.05
+            max_val = max(results_df["val_f1"].max(), results_df["test_f1"].max()) + 0.05
+            plt.plot([min_val, max_val], [min_val, max_val], "k--", alpha=0.5, label="Perfect correlation")
+
+            # Add mean point
+            plt.scatter([results_df["val_f1"].mean()], [results_df["test_f1"].mean()], s=200, c="red", marker="*", label="Mean")
+
+            # Add error bars for standard deviation
+            plt.errorbar(
+                results_df["val_f1"].mean(),
+                results_df["test_f1"].mean(),
+                xerr=results_df["val_f1"].std(),
+                yerr=results_df["test_f1"].std(),
+                fmt="none",
+                ecolor="red",
+                alpha=0.5,
+                capsize=5,
+            )
+
+            # Add labels and legend
+            plt.xlabel("Validation F1 Score", fontsize=14)
+            plt.ylabel("Test F1 Score", fontsize=14)
+            plt.title("Validation vs Test F1 Score Across Folds", fontsize=16)
+            plt.grid(True, alpha=0.3)
+            plt.legend(fontsize=12)
+
+            # Set equal axis limits
+            plt.xlim(min_val, max_val)
+            plt.ylim(min_val, max_val)
+
+            # Save the plot
+            plt.tight_layout()
+            plt.savefig(os.path.join(save_path, "val_vs_test_f1.png"))
+            logger.info(f"Plot saved to {os.path.join(save_path, 'val_vs_test_f1.png')}")
+            plt.close()
+
+        except Exception as e:
+            logger.error(f"Error creating plot: {e}")
 
         return True
 
@@ -789,7 +1023,7 @@ class ClinicalDataMLP:
         if not self.tune_and_train():
             return False
 
-        if not self.evaluate():
+        if not self.evaluate_with_cross_validation():
             return False
 
         logger.info("Pipeline completed successfully!")
@@ -803,9 +1037,9 @@ if __name__ == "__main__":
         "TARGET_COLUMN": ("Recurrence", "Recurrence event(s)", "{0 = no, 1 = yes}"),
         "TEST_SIZE": 0.20,
         "N_FOLDS": 5,
-        "N_OPTUNA_TRIALS": 5,
+        "N_OPTUNA_TRIALS": 50,
         "RANDOM_STATE": 42,
-        "TOP_N": 64,
+        "TOP_N": 128,
         "FILTER_DICT": {0: ["Recurrence", "Follow Up", "US features"]},
         "EXCLUDE_COLUMNS": [
             ("Tumor Characteristics", "Staging(Tumor Size)# [T]", ""),
@@ -830,7 +1064,7 @@ if __name__ == "__main__":
     model.run_pipeline()
 
     feature_importances = model.get_feature_importance(CONFIG["TOP_N"])
-
-    save_path = "work_dirs/clinical_experiments"
-    os.makedirs(save_path, exist_ok=True)
     feature_importances.to_csv(os.path.join(save_path, "mlp_clinic_FI.csv"))
+
+    with open(os.path.join(save_path, "mlp_best_params"), "w") as f:
+        json.dump(model.best_params, f)

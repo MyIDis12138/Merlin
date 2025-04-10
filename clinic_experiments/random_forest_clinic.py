@@ -8,7 +8,6 @@ import numpy as np
 import optuna
 import pandas as pd
 import seaborn as sns
-from optuna.visualization import plot_contour, plot_heatmap, plot_param_importances
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import accuracy_score, classification_report, f1_score
@@ -386,7 +385,7 @@ class ClinicalDataRandomForest:
                 model.fit(X_train_fold, y_train_fold)
 
                 preds = model.predict(X_val_fold)
-                f1 = f1_score(y_val_fold, preds, average="binary")
+                f1 = f1_score(y_val_fold, preds, average="weighted")
                 f1_scores.append(f1)
 
             return np.mean(f1_scores)

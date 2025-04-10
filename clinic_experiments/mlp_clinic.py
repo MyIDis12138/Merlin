@@ -532,7 +532,7 @@ class ClinicalDataMLP:
                     val_outputs = model(X_val_tensor)
                     val_preds = torch.argmax(val_outputs, dim=1).cpu().numpy()
 
-                f1 = f1_score(y_val_fold, val_preds, average="binary")
+                f1 = f1_score(y_val_fold, val_preds, average="weighted")
                 f1_scores.append(f1)
 
             # Return the mean F1 score across all folds

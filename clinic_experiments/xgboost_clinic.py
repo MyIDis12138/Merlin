@@ -405,7 +405,7 @@ class ClinicalDataXgboost:
                 model.fit(X_train_fold, y_train_fold, eval_set=[(X_val_fold, y_val_fold)], verbose=False)
 
                 preds = model.predict(X_val_fold)
-                f1 = f1_score(y_val_fold, preds, average="binary")
+                f1 = f1_score(y_val_fold, preds, average="weighted")
                 f1_scores.append(f1)
 
             return np.mean(f1_scores)

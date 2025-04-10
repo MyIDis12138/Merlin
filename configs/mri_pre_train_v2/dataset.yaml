@@ -1,5 +1,5 @@
 global_batch_size: &global_batch_size 8
-global_num_workers: &global_num_workers 0
+global_num_workers: &global_num_workers 4
 
 dataset:
   name: "bmri_dataset"
@@ -71,16 +71,16 @@ dataloader:
     batch_size: *global_batch_size
     shuffle: true
     num_workers: *global_num_workers
-    pin_memory: false
+    pin_memory: true
 
   val:
     batch_size: *global_batch_size
     shuffle: false
     num_workers: *global_num_workers
-    pin_memory: false
+    pin_memory: true
 
   test:
     batch_size: *global_batch_size
     shuffle: false
     num_workers: *global_num_workers
-    pin_memory: false
+    pin_memory: true

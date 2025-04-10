@@ -1,5 +1,5 @@
 runner:
-  name: "epoch_based_runner"
+  name: "epoch_based_runner_tr_cuda"
   max_epochs: 100
 
   hooks:

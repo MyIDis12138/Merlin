@@ -7,6 +7,8 @@ import torch
 from torch.amp import GradScaler
 from tqdm import tqdm
 
+from minidl.transforms import build_transform_pipeline
+
 from .base_runner import BaseRunner
 from .runner_registry import RunnerRegistry
 
@@ -338,16 +340,8 @@ class EpochBasedRunner(BaseRunner):
                 val_metrics = self.val_epoch()
                 self.logger.info(f"Epoch {epoch}/{self.max_epochs}, Val metrics: {val_metrics}")
 
-                if self.config.get("save_best", True):
-                    if val_metrics["loss"] < self.best_val_metric:
-                        self.best_val_metric = val_metrics["loss"]
-                        self.save_checkpoint("best_model", {"epoch": epoch, "metrics": val_metrics})
-
             if self.scheduler is not None:
                 self.scheduler.step()
-
-            if (epoch + 1) % self.config.get("checkpoint_interval", 10) == 0:
-                self.save_checkpoint(f"epoch_{epoch}", {"epoch": epoch, "metrics": train_metrics})
 
         self.call_hooks("after_train")
 
@@ -383,3 +377,160 @@ class EpochBasedRunner(BaseRunner):
         test_metrics = self.test_epoch()
 
         return test_metrics
+
+
+@RunnerRegistry.register("epoch_based_runner_tr_cuda")
+class EpochBasedTrCudaRunner(EpochBasedRunner):
+    """Epoch-based Runner with transforms in cuda.
+    NOTE: It ONLY handles the images transfroms for now!!!
+
+    This runner trains the model for a fixed number of epochs.
+
+    Attributes:
+        max_epochs (int): Maximum number of epochs to train for
+        current_epoch (int): Current epoch
+        hooks (list[PrioritizedHook]): list of hooks to call at different stages
+        iter (int): Current iteration
+        train_metrics (dict[str, float]): Training metrics
+        val_metrics (dict[str, float]): Validation metrics
+        test_metrics (dict[str, float]): Test metrics
+    """
+
+    def __init__(self, config: dict[str, Any], device: torch.device | None = None):
+        """Initialize the runner.
+
+        Args:
+            config: Configuration dictionary for the experiment
+            device: Device to run the experiment on, defaults to cuda if available
+        """
+        super().__init__(config, device)
+
+    def apply_batch_transform(self, batch_data, transform_pipeline):
+        """Apply transforms to each item in a batch while keeping data on the device
+        and preserving all other keys in the batch."""
+        batch_size = batch_data["images"][0].shape[0]
+
+        transformed_images = []
+        for i in range(batch_size):
+            sample = {"images": [batch_data["images"][j][i] for j in range(3)]}
+
+            transformed = transform_pipeline(sample)
+            transformed_images.append(transformed["images"].squeeze(0))
+
+        batch_data["images"] = torch.stack(transformed_images, dim=0)
+        return batch_data
+
+    @ensure_model_initialized
+    def train_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
+        """Perform a single training step.
+
+        Args:
+            batch: Batch of data
+
+        Returns:
+            Dictionary of loss values and metrics
+        """
+        # TODO:temporary indexing, more general indexing should be used
+        batch = self.apply_batch_transform(batch, self.train_transform)
+        inputs = batch["images"].to(self.device)
+        targets = batch["clinical_label"].to(self.device)
+
+        loss_fn = self.loss_fn
+        optimizer = self.optimizer
+
+        if loss_fn is None or optimizer is None:
+            self.logger.error("Cannot perform train step: loss_fn or optimizer is None")
+            return {"loss": torch.tensor(float("inf"), device=self.device)}
+
+        scaler = GradScaler(self.device)
+        optimizer.zero_grad()
+        with torch.amp.autocast(self.device.type):
+            outputs = self.model(inputs)  # type: ignore
+            loss = loss_fn(outputs, targets)
+
+        scaler.scale(loss).backward()
+
+        self.grad_norm = compute_gradient_norm(self.model, norm_type=2.0)  # type: ignore
+        self.grad_norm_history.append(float(self.grad_norm))
+
+        if self.grad_clip_enabled and self.grad_clip_value > 0:
+            scaler.unscale_(optimizer)
+
+            if self.grad_clip_type == "norm":
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_value)
+            elif self.grad_clip_type == "value":
+                torch.nn.utils.clip_grad_value_(self.model.parameters(), self.grad_clip_value)
+
+        scaler.step(optimizer)
+        scaler.update()
+
+        # Store step metrics for hooks
+        self.train_step_metrics = {"loss": loss, "grad_norm": self.grad_norm}
+
+        return {"loss": loss, "grad_norm": self.grad_norm}
+
+    @ensure_model_initialized
+    def val_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
+        """Perform a single validation step.
+
+        Args:
+            batch: Batch of data
+
+        Returns:
+            Dictionary of metrics
+        """
+        # TODO:temporary indexing, more general indexing should be used
+        batch = self.apply_batch_transform(batch, self.val_transform)
+
+        inputs = batch["images"].to(self.device)
+        targets = batch["clinical_label"].to(self.device)
+
+        model = self.model
+        loss_fn = self.loss_fn
+
+        if loss_fn is None:
+            self.logger.error("Cannot perform validation step: loss_fn is None")
+            return {"loss": torch.tensor(float("inf"), device=self.device), "accuracy": torch.tensor(0.0, device=self.device)}
+
+        with torch.no_grad():
+            outputs = model(inputs)
+            loss = loss_fn(outputs, targets)
+
+            metrics = {}
+            if hasattr(self, "metrics_calculator"):
+                metrics = self.metrics_calculator.compute_metrics(outputs, targets)
+                metrics = {k: torch.tensor(v, device=self.device) for k, v in metrics.items()}
+
+        return {"loss": loss, **metrics}
+
+    def run(self) -> None:
+        """Run the training, validation, and testing process."""
+        # Build components
+        self.build_model()
+        self.build_dataset()
+        for dataset in [self.train_dataset, self.val_dataset, self.test_dataset]:
+            if dataset:
+                dataset.transform = None
+
+        dataset_config = self.config.get("dataset", {})
+        for split in ["train", "val", "test"]:
+            transform_configs = dataset_config.get("transforms", {}).get(split, {})
+            if transform_configs:
+                transform = build_transform_pipeline(transform_configs)
+                self.__setattr__(f"{split}_transform", transform)
+
+        self.build_dataloader()
+        self.build_loss()
+        self.build_metrics()
+        self.build_optimizer()
+
+        # Run training
+        self.train()
+
+        # Run validation
+        val_metrics = self.validate()
+        self.logger.info(f"Validation metrics: {val_metrics}")
+
+        # Run testing
+        test_metrics = self.test()
+        self.logger.info(f"Test metrics: {test_metrics}")

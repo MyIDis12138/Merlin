@@ -1,4 +1,6 @@
+import json
 import logging
+import os
 import warnings
 
 import matplotlib.pyplot as plt
@@ -11,7 +13,14 @@ from sklearn.impute import SimpleImputer
 from sklearn.metrics import accuracy_score, classification_report, f1_score
 from sklearn.model_selection import StratifiedKFold, train_test_split
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+save_path = "work_dirs/clinical_experiments/xgboost"
+os.makedirs(save_path, exist_ok=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[logging.FileHandler(os.path.join(save_path, "xgboost_model.log")), logging.StreamHandler()],  # This keeps console output
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 
@@ -237,11 +246,11 @@ class ClinicalDataXgboost:
             df_processed (pd.DataFrame): Processed dataframe with target.
             original_X_columns (pd.Index): Original MultiIndex columns.
         """
-
         numerical_cols = []
         categorical_cols = []
 
-        col_mapping_flat_to_original = {flat: orig for flat, orig in zip(self.X.columns, original_X_columns)}
+        # Create a mapping from flat column names to original multi-level columns
+        self.column_mapping = {flat: orig for flat, orig in zip(self.X.columns, original_X_columns)}
 
         for i, col in enumerate(self.X.columns):
             original_col_tuple = original_X_columns[i]
@@ -265,19 +274,48 @@ class ClinicalDataXgboost:
             logger.info("Imputed missing values in numerical columns using median.")
 
         if categorical_cols:
-
             cat_imputer = SimpleImputer(strategy="constant", fill_value="Missing")
             self.X[categorical_cols] = cat_imputer.fit_transform(self.X[categorical_cols])
             logger.info("Imputed missing values in categorical columns with 'Missing'.")
+
+            # Store the mapping for categorical features before one-hot encoding
+            categorical_mapping = {}
+            for cat_col in categorical_cols:
+                original_col = self.column_mapping[cat_col]
+                unique_vals = self.X[cat_col].unique()
+                for val in unique_vals:
+                    # Create mappings for the one-hot encoded columns that will be created
+                    encoded_col = f"{cat_col}_{val}"
+                    categorical_mapping[encoded_col] = (original_col, val)
 
             self.X = pd.get_dummies(self.X, columns=categorical_cols, drop_first=True, dummy_na=False, dtype=int)
             logger.info("Applied one-hot encoding to categorical columns.")
             logger.info(f"Data shape after encoding: {self.X.shape}")
 
-            logger.info("Cleaning column names for XGBoost compatibility...")
+            # Update the column mapping with the one-hot encoded columns
+            for encoded_col in self.X.columns:
+                if encoded_col in self.column_mapping:
+                    continue  # Skip columns that already have a mapping
+
+                # Try to find the base column name
+                for cat_col in categorical_cols:
+                    if encoded_col.startswith(cat_col + "_"):
+                        value = encoded_col[len(cat_col) + 1 :]
+                        self.column_mapping[encoded_col] = (self.column_mapping[cat_col], value)
+                        break
+
+            logger.info("Cleaning column names for SVM compatibility...")
             original_cols = self.X.columns.tolist()
             self.X.columns = self.X.columns.str.replace("[\[\]<]", "_", regex=True)
             cleaned_cols = self.X.columns.tolist()
+
+            # Update column mapping after cleaning column names
+            cleaned_mapping = {}
+            for orig, clean in zip(original_cols, cleaned_cols):
+                if orig in self.column_mapping:
+                    cleaned_mapping[clean] = self.column_mapping[orig]
+
+            self.column_mapping = cleaned_mapping
 
             changed_cols = [(orig, clean) for orig, clean in zip(original_cols, cleaned_cols) if orig != clean]
             if changed_cols:
@@ -296,6 +334,9 @@ class ClinicalDataXgboost:
             if self.X.isnull().any().any():
                 final_num_imputer = SimpleImputer(strategy="median")
                 self.X[final_numerical_cols] = final_num_imputer.fit_transform(self.X[final_numerical_cols])
+
+        # Store feature names
+        self.feature_names = self.X.columns.tolist()
 
         logger.info(f"Final feature shape: {self.X.shape}")
 
@@ -327,20 +368,19 @@ class ClinicalDataXgboost:
 
             params = {
                 "objective": "binary:logistic",
-                "eval_metric": "logloss",
+                "eval_metric": "aucpr",  # Or perhaps 'aucpr' for evaluation during training
+                "scale_pos_weight": self.calculated_scale_pos_weight,
                 "booster": trial.suggest_categorical("booster", ["gbtree", "dart"]),
                 "lambda": trial.suggest_float("lambda", 1e-8, 1.0, log=True),
                 "alpha": trial.suggest_float("alpha", 1e-8, 1.0, log=True),
-                "n_estimators": trial.suggest_int("n_estimators", 50, 1000),
-                "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
-                "max_depth": trial.suggest_int("max_depth", 3, 9),
+                "n_estimators": trial.suggest_int("n_estimators", 100, 300),
+                "learning_rate": trial.suggest_float("learning_rate", 1e-3, 0.1, log=True),
+                "max_depth": trial.suggest_int("max_depth", 3, 10),
                 "subsample": trial.suggest_float("subsample", 0.5, 1.0),
                 "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
                 "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
-                "gamma": trial.suggest_float("gamma", 1e-8, 1.0, log=True),
+                "gamma": trial.suggest_float("gamma", 1e-8, 0.2, log=True),
                 "use_label_encoder": False,
-                "random_state": self.random_state,
-                "early_stopping_rounds": 50,
             }
 
             if self.use_gpu:
@@ -350,8 +390,8 @@ class ClinicalDataXgboost:
             if params["booster"] == "dart":
                 params["sample_type"] = trial.suggest_categorical("sample_type", ["uniform", "weighted"])
                 params["normalize_type"] = trial.suggest_categorical("normalize_type", ["tree", "forest"])
-                params["rate_drop"] = trial.suggest_float("rate_drop", 1e-8, 0.5, log=True)
-                params["skip_drop"] = trial.suggest_float("skip_drop", 1e-8, 0.5, log=True)
+                params["rate_drop"] = trial.suggest_float("rate_drop", 1e-6, 0.3, log=True)
+                params["skip_drop"] = trial.suggest_float("skip_drop", 1e-6, 0.3, log=True)
 
             model = xgb.XGBClassifier(**params)
 
@@ -365,7 +405,7 @@ class ClinicalDataXgboost:
                 model.fit(X_train_fold, y_train_fold, eval_set=[(X_val_fold, y_val_fold)], verbose=False)
 
                 preds = model.predict(X_val_fold)
-                f1 = f1_score(y_val_fold, preds, average="binary")
+                f1 = f1_score(y_val_fold, preds, average="weighted")
                 f1_scores.append(f1)
 
             return np.mean(f1_scores)
@@ -379,6 +419,16 @@ class ClinicalDataXgboost:
         if self.X_train is None or self.y_train is None:
             logger.error("Training data not split. Call split_data() first.")
             return False
+
+        # Calculate scale_pos_weight from the training data
+        neg_count = np.sum(self.y_train == 0)
+        pos_count = np.sum(self.y_train == 1)
+        if pos_count > 0:
+            self.calculated_scale_pos_weight = neg_count / pos_count
+            logger.info(f"Calculated scale_pos_weight for imbalance: {self.calculated_scale_pos_weight:.4f}")
+        else:
+            logger.warning("No positive instances in training data for scale_pos_weight calculation. Using default 1.")
+            self.calculated_scale_pos_weight = 1
 
         logger.info(f"Running Optuna optimization with {self.n_optuna_trials} trials...")
 
@@ -398,6 +448,7 @@ class ClinicalDataXgboost:
         final_params["early_stopping_rounds"] = 50
         final_params["objective"] = "binary:logistic"
         final_params["eval_metric"] = "logloss"
+        final_params["scale_pos_weight"] = self.calculated_scale_pos_weight
         final_params["use_label_encoder"] = False
         final_params["random_state"] = self.random_state
 
@@ -440,13 +491,156 @@ class ClinicalDataXgboost:
 
         return True
 
-    def get_feature_importance(self, top_n=20, plot=True):
+    def evaluate_with_cross_validation(self):
+        """
+        Train, validate, and test the model using cross-validation.
+        For each fold, train a model, evaluate on validation set, and evaluate on the test set.
+        This allows comparison between validation and test performance.
+        """
+        if self.X is None or self.y is None:
+            logger.error("Features and target not prepared. Call prepare_data() first.")
+            return False
+
+        logger.info("Evaluating model with cross-validation...")
+
+        # Extract best parameters from Optuna tuning
+        if self.best_params is None:
+            logger.error("No best parameters found. Call tune_and_train() first.")
+            return False
+
+        # Set up cross-validation
+        cv = StratifiedKFold(n_splits=self.n_folds, shuffle=True, random_state=self.random_state)
+
+        # Arrays to store results
+        fold_results = []
+
+        fold_count = 1
+
+        # For each fold
+        for train_idx, val_idx in cv.split(self.X_train, self.y_train):
+            logger.info(f"Training and evaluating fold {fold_count}/{self.n_folds}")
+
+            X_train_fold = self.X_train.iloc[train_idx]
+            X_val_fold = self.X_train.iloc[val_idx]
+            y_train_fold = self.y_train.iloc[train_idx]
+            y_val_fold = self.y_train.iloc[val_idx]
+
+            fold_params = self.best_params.copy()
+            fold_params["early_stopping_rounds"] = 50
+            fold_params["objective"] = "binary:logistic"
+            fold_params["eval_metric"] = "logloss"
+            fold_params["use_label_encoder"] = False
+            fold_params["random_state"] = self.random_state
+
+            if self.use_gpu:
+                fold_params["tree_method"] = "gpu_hist"
+                fold_params["gpu_id"] = 0
+
+            fold_model = xgb.XGBClassifier(**fold_params)
+
+            fold_model.fit(X_train_fold, y_train_fold, eval_set=[(X_val_fold, y_val_fold)], verbose=False)
+
+            # Validation evaluation
+            val_preds = fold_model.predict(X_val_fold)
+            val_f1 = f1_score(y_val_fold, val_preds, average="binary")
+            val_accuracy = accuracy_score(y_val_fold, val_preds)
+
+            # Test evaluation
+            test_preds = fold_model.predict(self.X_test)
+            test_f1 = f1_score(self.y_test, test_preds, average="binary")
+            test_accuracy = accuracy_score(self.y_test, test_preds)
+
+            fold_results.append(
+                {"fold": fold_count, "val_f1": val_f1, "val_accuracy": val_accuracy, "test_f1": test_f1, "test_accuracy": test_accuracy}
+            )
+
+            logger.info(f"Fold {fold_count} - Val F1: {val_f1:.4f}, Test F1: {test_f1:.4f}")
+
+            fold_count += 1
+
+        # Convert results to DataFrame
+        results_df = pd.DataFrame(fold_results)
+
+        # Save results
+        results_df.to_csv(os.path.join(save_path, "cross_validation_results.csv"), index=False)
+
+        # Calculate average performance
+        avg_val_f1 = results_df["val_f1"].mean()
+        avg_test_f1 = results_df["test_f1"].mean()
+
+        logger.info(f"Average validation F1: {avg_val_f1:.4f}")
+        logger.info(f"Average test F1: {avg_test_f1:.4f}")
+
+        # Create validation vs test performance plot
+        self._plot_val_vs_test_performance(results_df)
+
+        return True
+
+    def _plot_val_vs_test_performance(self, results_df):
+        """
+        Create a plot comparing validation and test F1 scores.
+        Args:
+            results_df (pd.DataFrame): DataFrame with validation and test results.
+        """
+        try:
+            plt.figure(figsize=(10, 8))
+
+            # Plot validation F1 vs test F1
+            plt.scatter(results_df["val_f1"], results_df["test_f1"], s=100, alpha=0.7, c="blue", label="Folds")
+
+            # Add fold numbers as labels
+            for i, row in results_df.iterrows():
+                plt.text(row["val_f1"], row["test_f1"], f"  {row['fold']}", fontsize=12)
+
+            min_val = min(results_df["val_f1"].min(), results_df["test_f1"].min()) - 0.05
+            max_val = max(results_df["val_f1"].max(), results_df["test_f1"].max()) + 0.05
+            plt.plot([min_val, max_val], [min_val, max_val], "k--", alpha=0.5, label="Perfect correlation")
+
+            # Add mean point
+            plt.scatter([results_df["val_f1"].mean()], [results_df["test_f1"].mean()], s=200, c="red", marker="*", label="Mean")
+
+            # Add error bars for standard deviation
+            plt.errorbar(
+                results_df["val_f1"].mean(),
+                results_df["test_f1"].mean(),
+                xerr=results_df["val_f1"].std(),
+                yerr=results_df["test_f1"].std(),
+                fmt="none",
+                ecolor="red",
+                alpha=0.5,
+                capsize=5,
+            )
+
+            # Add labels and legend
+            plt.xlabel("Validation F1 Score", fontsize=14)
+            plt.ylabel("Test F1 Score", fontsize=14)
+            plt.title("Validation vs Test F1 Score Across Folds", fontsize=16)
+            plt.grid(True, alpha=0.3)
+            plt.legend(fontsize=12)
+
+            # Set equal axis limits
+            plt.xlim(min_val, max_val)
+            plt.ylim(min_val, max_val)
+
+            # Save the plot
+            plt.tight_layout()
+            plt.savefig(os.path.join(save_path, "val_vs_test_f1.png"))
+            logger.info(f"Plot saved to {os.path.join(save_path, 'val_vs_test_f1.png')}")
+            plt.close()
+
+        except Exception as e:
+            logger.error(f"Error creating plot: {e}")
+
+        return True
+
+    def get_feature_importance(self, top_n=20, plot=True, preserve_original_columns=True):
         """
         Get and optionally plot feature importance.
 
         Args:
             top_n (int): Number of top features to show.
             plot (bool): Whether to generate a plot.
+            preserve_original_columns (bool): Whether to map feature names back to original multi-index columns.
 
         Returns:
             pd.DataFrame: DataFrame of feature importances.
@@ -456,10 +650,35 @@ class ClinicalDataXgboost:
             return None
 
         importances = self.final_model.feature_importances_
-        feature_names = self.X_train.columns
+        flat_feature_names = self.X_train.columns
 
-        importance_df = pd.DataFrame({"Feature": feature_names, "Importance": importances})
+        # Map flat feature names to original multi-level columns
+        if preserve_original_columns:
+            # Store the flat to original column mapping during _process_features
+            # We need to update the _process_features method to store this mapping
+            if hasattr(self, "column_mapping"):
+                # Use the stored mapping
+                original_feature_names = []
+                for flat_name in flat_feature_names:
+                    # If this is a one-hot encoded column, get the base column
+                    if "_" in flat_name and flat_name.rsplit("_", 1)[-1].isdigit():
+                        base_col = flat_name.rsplit("_", 1)[0]
+                        if base_col in self.column_mapping:
+                            original_feature_names.append((self.column_mapping[base_col], flat_name))
+                        else:
+                            original_feature_names.append(flat_name)
+                    else:
+                        original_feature_names.append(self.column_mapping.get(flat_name, flat_name))
 
+                # Create DataFrame with both original and flat column names
+                importance_df = pd.DataFrame({"Feature": flat_feature_names, "Original_Feature": original_feature_names, "Importance": importances})
+            else:
+                logger.warning("Column mapping not found. Using flat feature names.")
+                importance_df = pd.DataFrame({"Feature": flat_feature_names, "Importance": importances})
+        else:
+            importance_df = pd.DataFrame({"Feature": flat_feature_names, "Importance": importances})
+
+        # Sort by importance
         importance_df = importance_df.sort_values(by="Importance", ascending=False)
 
         logger.info(f"Top {top_n} Features:")
@@ -468,8 +687,9 @@ class ClinicalDataXgboost:
         if plot:
             try:
                 plt.figure(figsize=(10, 8))
-                sns.barplot(x="Importance", y="Feature", data=importance_df.head(top_n))
-                plt.title(f"Top {top_n} Feature Importances (XGBoost)")
+                plot_data = importance_df.head(top_n)
+                sns.barplot(x="Importance", y="Feature", data=plot_data)
+                plt.title(f"Top {top_n} Feature Importances (Random Forest)")
                 plt.tight_layout()
                 plt.show()
             except Exception as e:
@@ -493,6 +713,9 @@ class ClinicalDataXgboost:
         if not self.tune_and_train():
             return False
 
+        if not self.evaluate_with_cross_validation():
+            return False
+
         if not self.evaluate():
             return False
 
@@ -511,7 +734,13 @@ if __name__ == "__main__":
         "RANDOM_STATE": 42,
         "TOP_N": 64,
         "FILTER_DICT": {0: ["Recurrence", "Follow Up", "US features"]},
-        "EXCLUDE_COLUMNS": [("Tumor Characteristics", "Staging(Tumor Size)# [T]", ""), ("Mammography Characteristics", "Tumor Size (cm)", "")],
+        "EXCLUDE_COLUMNS": [
+            ("Tumor Characteristics", "Staging(Tumor Size)# [T]", ""),
+            ("Mammography Characteristics", "Tumor Size (cm)", ""),
+            ("MRI Technical Information", "Image Position of Patient", ""),
+            ("Patient Information", "Patient ID", ""),
+            ("Tumor Characteristics", "Position", "Position (every bx positive for invasive cancer)(used during annotation)"),
+        ],
     }
 
     model = ClinicalDataXgboost(
@@ -528,4 +757,8 @@ if __name__ == "__main__":
     model.run_pipeline()
 
     feature_importances = model.get_feature_importance(CONFIG["TOP_N"])
-    feature_importances.to_csv("work_dirs/clinical_experiments/xgb_clinic_FI.csv")
+
+    feature_importances.to_csv(os.path.join(save_path, "xgb_clinic_FI.csv"))
+
+    with open(os.path.join(save_path, "mlp_best_params"), "w") as f:
+        json.dump(model.best_params, f)

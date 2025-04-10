@@ -670,7 +670,7 @@ class ClinicalDataMLP:
         y_pred_proba_test = self.final_model.predict_proba(self.X_test)[:, 1]
 
         test_accuracy = accuracy_score(self.y_test, y_pred_test)
-        test_f1 = f1_score(self.y_test, y_pred_test, average="binary")
+        test_f1 = f1_score(self.y_test, y_pred_test, average="weighted")
 
         logger.info(f"Test Set Accuracy: {test_accuracy:.4f}")
         logger.info(f"Test Set F1 Score: {test_f1:.4f}")
@@ -795,7 +795,7 @@ class ClinicalDataMLP:
                     val_outputs = fold_model(X_val_tensor)
                     val_loss = criterion(val_outputs, y_val_tensor).item()
                     val_preds = torch.argmax(val_outputs, dim=1).cpu().numpy()
-                    val_f1 = f1_score(y_val_fold, val_preds, average="binary")
+                    val_f1 = f1_score(y_val_fold, val_preds, average="weighted")
 
                 if (epoch + 1) % 10 == 0:
                     logger.info(
@@ -823,14 +823,14 @@ class ClinicalDataMLP:
             with torch.no_grad():
                 val_outputs = fold_model(X_val_tensor)
                 val_preds = torch.argmax(val_outputs, dim=1).cpu().numpy()
-                val_f1 = f1_score(y_val_fold, val_preds, average="binary")
+                val_f1 = f1_score(y_val_fold, val_preds, average="weighted")
                 val_accuracy = accuracy_score(y_val_fold, val_preds)
 
             # Test evaluation
             with torch.no_grad():
                 test_outputs = fold_model(X_test_tensor)
                 test_preds = torch.argmax(test_outputs, dim=1).cpu().numpy()
-                test_f1 = f1_score(self.y_test, test_preds, average="binary")
+                test_f1 = f1_score(self.y_test, test_preds, average="weighted")
                 test_accuracy = accuracy_score(self.y_test, test_preds)
 
             fold_results.append(
@@ -941,7 +941,7 @@ class ClinicalDataMLP:
         # For each feature, shuffle its values and see how much the performance drops
         self.final_model.eval()
         baseline_pred = self.final_model.predict(self.X_test)
-        baseline_score = f1_score(self.y_test, baseline_pred, average="binary")
+        baseline_score = f1_score(self.y_test, baseline_pred, average="weighted")
 
         importance = []
 
@@ -955,7 +955,7 @@ class ClinicalDataMLP:
 
             # Predict with shuffled feature
             preds_permuted = self.final_model.predict(X_test_permuted)
-            score_permuted = f1_score(self.y_test, preds_permuted, average="binary")
+            score_permuted = f1_score(self.y_test, preds_permuted, average="weighted")
 
             # The importance is the drop in performance
             feature_importance = baseline_score - score_permuted

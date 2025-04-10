@@ -28,6 +28,7 @@ dataset:
       - name: "ToTensor"
         params:
           device: "cuda"
+
       - name: "Resize"
         params:
           target_size: *target_size

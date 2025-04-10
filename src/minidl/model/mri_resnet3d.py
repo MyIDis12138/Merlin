@@ -172,20 +172,20 @@ class MRI_ResNet3D(nn.Module):
         )
 
         self.spatial_attention = nn.Sequential(
-            nn.AdaptiveAvgPool3d(1), nn.Conv3d(d_model, d_model // 2, 1), nn.GELU(), nn.Conv3d(d_model // 2, d_model, 1), nn.Sigmoid()
+            nn.AdaptiveAvgPool3d(1), nn.Conv3d(d_model * 3, d_model, 1), nn.GELU(), nn.Conv3d(d_model, d_model * 3, 1), nn.Sigmoid()
         )
 
-        self.attention = MultiHeadAttention(d_model, 4)
+        self.attention = MultiHeadAttention(d_model * 3, 8)
 
         self.feed_forward = nn.Sequential(
-            nn.Linear(d_model * 3, d_model * 2),
+            nn.Linear(d_model * 6, d_model * 12),
             nn.GELU(),
-            nn.Linear(d_model * 2, d_model),
+            nn.Linear(d_model * 12, d_model * 3),
             nn.GELU(),
         )
-        self.layer_norm = nn.LayerNorm(d_model)
+        self.layer_norm = nn.LayerNorm(d_model * 3)
 
-        self.classifier = nn.Sequential(nn.Linear(d_model, d_model * 2), nn.GELU(), nn.Dropout(out_dropout), nn.Linear(d_model * 2, n_classes))
+        self.classifier = nn.Sequential(nn.Linear(d_model * 3, d_model * 6), nn.GELU(), nn.Dropout(out_dropout), nn.Linear(d_model * 6, n_classes))
 
         self._initialize_weights()
 
@@ -236,23 +236,26 @@ class MRI_ResNet3D(nn.Module):
         for i in range(3):
             mri = x[:, i : i + 1]  # [B, 1, D, H, W]
 
-            feat = self.forward_features(mri)
+            feat = self.forward_features(mri)  # [B, 255, 3, 5, 5] for half size
 
-            feat = self.mri_adapters[i](feat)
+            feat = self.mri_adapters[i](feat)  # [B, d_model, 3, 5, 5]
+            features.append(feat)
 
-            attn = self.spatial_attention(feat)
-            feat = feat * attn
+        V = torch.cat(features, dim=1)  # [B, 3 * d_model, 3, 5, 5]
+        B, _, D, H, W = V.shape
+        attn = self.spatial_attention(V)  # [B, 3 * d_model, 1, 1, 1]
+        V = V * attn  # [B,  3 * d_model, 3, 5, 5]
 
-            feat_gap = F.adaptive_avg_pool3d(feat, 1).squeeze(-1).squeeze(-1).squeeze(-1)  # [B, d_model]
-            features.append(feat_gap)
+        V = V.view(B, 3 * self.d_model, -1).transpose(1, 2)
 
-        V = torch.stack(features, dim=1)  # [B, 3, d_model]
+        attn_output, _ = self.attention(V, V, V)  # [B, 3 * 5 * 5, 3 * d_model]
 
-        attn_output, _ = self.attention(V, V, V)
+        x_avg = F.adaptive_avg_pool3d(V.transpose(1, 2).reshape(B, -1, D, H, W), 1).squeeze().reshape(B, -1)  # [B, 3 * d_model]
+        x_max = F.adaptive_max_pool3d(V.transpose(1, 2).reshape(B, -1, D, H, W), 1).squeeze().reshape(B, -1)
 
-        x = self.feed_forward(attn_output.view(-1, 3 * self.d_model))
+        x = self.feed_forward(torch.cat([x_avg, x_max], dim=1))
 
-        res_x = torch.mean(attn_output, dim=1)  # [B, d_model]
+        res_x = torch.mean(attn_output, dim=1)  # [B, 3 * d_model]
 
         x = self.layer_norm(x + res_x)
 

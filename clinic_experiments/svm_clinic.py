@@ -370,7 +370,7 @@ class ClinicalDataSVM:
                 model.fit(X_train_fold, y_train_fold)
 
                 preds = model.predict(X_val_fold)
-                f1 = f1_score(y_val_fold, preds, average="binary")
+                f1 = f1_score(y_val_fold, preds, average="weighted")
                 f1_scores.append(f1)
 
             return np.mean(f1_scores)
@@ -422,7 +422,7 @@ class ClinicalDataSVM:
         y_pred_proba_test = self.final_model.predict_proba(self.X_test)[:, 1]
 
         test_accuracy = accuracy_score(self.y_test, y_pred_test)
-        test_f1 = f1_score(self.y_test, y_pred_test, average="binary")
+        test_f1 = f1_score(self.y_test, y_pred_test, average="weighted")
 
         logger.info(f"Test Set Accuracy: {test_accuracy:.4f}")
         logger.info(f"Test Set F1 Score: {test_f1:.4f}")

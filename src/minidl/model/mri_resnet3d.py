@@ -175,6 +175,7 @@ class MRI_ResNet3D(nn.Module):
             nn.AdaptiveAvgPool3d(1), nn.Conv3d(d_model * 3, d_model, 1), nn.GELU(), nn.Conv3d(d_model, d_model * 3, 1), nn.Sigmoid()
         )
 
+        self.position_embeddings = nn.Embedding(3, d_model * 3)
         self.attention = MultiHeadAttention(d_model * 3, 8)
 
         self.feed_forward = nn.Sequential(
@@ -183,7 +184,7 @@ class MRI_ResNet3D(nn.Module):
             nn.Linear(d_model * 12, d_model * 3),
             nn.GELU(),
         )
-        self.layer_norm = nn.LayerNorm(d_model * 3)
+        self.layer_norm = nn.LayerNorm(d_model * 6)
 
         self.classifier = nn.Sequential(nn.Linear(d_model * 3, d_model * 6), nn.GELU(), nn.Dropout(out_dropout), nn.Linear(d_model * 6, n_classes))
 
@@ -238,26 +239,32 @@ class MRI_ResNet3D(nn.Module):
 
             feat = self.forward_features(mri)  # [B, 255, 3, 5, 5] for half size
 
-            feat = self.mri_adapters[i](feat)  # [B, d_model, 3, 5, 5]
+            feat = self.mri_adapters[i](feat)  # [B, d_model, D, H, W]
             features.append(feat)
 
-        V = torch.cat(features, dim=1)  # [B, 3 * d_model, 3, 5, 5]
-        B, _, D, H, W = V.shape
+        V = torch.cat(features, dim=1)  # [B, 3 * d_model, D, H, W]
+        B, C, D, H, W = V.shape  # C = 3 * d_model
+
         attn = self.spatial_attention(V)  # [B, 3 * d_model, 1, 1, 1]
-        V = V * attn  # [B,  3 * d_model, 3, 5, 5]
+        V = V * attn  # [B,  3 * d_model, D, H, W]
 
-        V = V.view(B, 3 * self.d_model, -1).transpose(1, 2)
+        V = V.view(B, C, -1).transpose(1, 2)  # [B, D * H * W, 3 * d_model]
 
-        attn_output, _ = self.attention(V, V, V)  # [B, 3 * 5 * 5, 3 * d_model]
+        position_ids = torch.arange(D * H * W, device=V.device).unsqueeze(0).expand(B, -1)  # [B, D * H * W]
+        position_embeddings = self.position_embeddings(position_ids)  # [B, D * H * W, 3 * d_model]
 
-        x_avg = F.adaptive_avg_pool3d(V.transpose(1, 2).reshape(B, -1, D, H, W), 1).squeeze().reshape(B, -1)  # [B, 3 * d_model]
-        x_max = F.adaptive_max_pool3d(V.transpose(1, 2).reshape(B, -1, D, H, W), 1).squeeze().reshape(B, -1)
+        V_prev = V + position_embeddings
 
-        x = self.feed_forward(torch.cat([x_avg, x_max], dim=1))
+        attn_output, _ = self.attention(V_prev, V_prev, V_prev)  # [B, D * H * W, 3 * d_model]
 
-        res_x = torch.mean(attn_output, dim=1)  # [B, 3 * d_model]
+        attn_output = attn_output.transpose(1, 2).view(B, C, D, H, W)
+        x_avg = F.adaptive_avg_pool3d(attn_output, 1).squeeze(-1).squeeze(-1).squeeze(-1)  # [B, 3 * d_model]
+        x_max = F.adaptive_max_pool3d(attn_output, 1).squeeze(-1).squeeze(-1).squeeze(-1)  # [B, 3 * d_model]
 
-        x = self.layer_norm(x + res_x)
+        x_prev = torch.cat([x_avg, x_max], dim=1)
+        x = self.feed_forward(x_prev)  # [B, 6 * d_model]
+
+        x = self.layer_norm(x + x_prev)
 
         logits = self.classifier(x)
 

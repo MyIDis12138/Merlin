@@ -1,4 +1,4 @@
-global_batch_size: &global_batch_size 8
+global_batch_size: &global_batch_size 32
 global_num_workers: &global_num_workers 0
 
 dataset:
@@ -13,6 +13,7 @@ dataset:
     clinical_label: ['Recurrence', 'Recurrence event(s)', '{0 = no, 1 = yes}']
     # ["Tumor Characteristics", "Mol Subtype", "{0 = luminal-like,\n1 = ER/PR pos, HER2 pos,\n2 = her2,\n3 = trip neg}",]
     # batch_size: *global_batch_size
+    max_workers: 128
 
   indices:
     train: [358]

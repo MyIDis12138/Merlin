@@ -1,11 +1,11 @@
 runner:
   name: "epoch_based_runner"
-  max_epochs: 100
+  max_epochs: 5
 
   hooks:
     - name: "checkpoint_loader_hook"
       params:
-        checkpoint_path: "work_dirs/experiments/recurrance_dmodel_256_lr1e5"
+        checkpoint_path: "work_dirs/experiments/recurrance_mri_baseline_dmodel_256_lr1e4"
         strict: true
         enable: true
 

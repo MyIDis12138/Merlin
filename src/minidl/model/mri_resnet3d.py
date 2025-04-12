@@ -233,7 +233,6 @@ class MRI_ResNet3D(nn.Module):
             Output tensor of shape [B, n_classes]
         """
         # x: tensor of 3 MRI images, shaped [B, 3, D, H, W]
-        x = x["images"]
         features = []
 
         for i in range(3):

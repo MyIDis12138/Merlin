@@ -26,34 +26,15 @@ dataset:
     target_size: &target_size [144, 96, 144]
     train:
       - name: "ToTensor"
-        params:
-          device: "cuda"
+
       - name: "Resize"
         params:
           target_size: *target_size
           mode: "bilinear"
 
-      - name: "RandomBiasField"
-
-      - name: "RandomMotion"
-        params:
-          num_transforms: 2
-          prob: 0.5
-
-      - name: "RandomFlip"
-        params:
-          axes: 2
-          flip_probability: 0.5
-
-      - name: "RandomNoise"
-        params:
-          mean: 9
-          std: [0.1, 0.5]
-
-      - name: "Normalize"
-
     val:  # Transforms for validation set
       - name: "ToTensor"
+
       - name: "Resize"
         params:
           target_size: *target_size
@@ -61,6 +42,7 @@ dataset:
 
     test:  # Transforms for test set
       - name: "ToTensor"
+
       - name: "Resize"
         params:
           target_size: *target_size

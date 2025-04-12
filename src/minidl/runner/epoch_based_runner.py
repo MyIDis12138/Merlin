@@ -554,6 +554,14 @@ class MultimodalRunner(EpochBasedRunner):
         self.input_keys = mm_config.get("input_keys", ["images", "clinical_features"])
         self.target_key = mm_config.get("target_key", "clinical_label")
 
+        runner_config = config.get("runner", {})
+        transforms_config = runner_config.get("transforms", {})
+        for split in ["train", "val", "test"]:
+            transform_configs = transforms_config.get(split, {})
+            if transform_configs:
+                transform = build_transform_pipeline(transform_configs)
+                self.__setattr__(f"{split}_transform", transform)
+
         self.logger.info(f"Multimodal configuration: input_keys={self.input_keys}, target_key={self.target_key}")
 
     def apply_batch_transform(self, batch_data, transform_pipeline):
@@ -562,11 +570,11 @@ class MultimodalRunner(EpochBasedRunner):
         and preserving all other keys in the batch.
         """
         if "images" in batch_data:
-            batch_size = batch_data["images"][0].shape[0]
+            batch_size = batch_data["images"].shape[0]
 
             transformed_images = []
             for i in range(batch_size):
-                sample = {"images": [batch_data["images"][j][i] for j in range(3)]}
+                sample = {"images": [batch_data["images"][i][j] for j in range(3)]}
 
                 transformed = transform_pipeline(sample)
                 transformed_images.append(transformed["images"].squeeze(0))
@@ -579,7 +587,8 @@ class MultimodalRunner(EpochBasedRunner):
     def train_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
         """Perform a single training step with multimodal inputs."""
         # Apply transforms to the batch
-        batch = self.apply_batch_transform(batch, self.train_transform)
+        if hasattr(self, "train_transform"):
+            batch = self.apply_batch_transform(batch, self.train_transform)
 
         # Move all tensors to the device
         for key, value in batch.items():
@@ -624,7 +633,8 @@ class MultimodalRunner(EpochBasedRunner):
     @ensure_model_initialized
     def val_step(self, batch: dict[str, Any]) -> dict[str, torch.Tensor]:
         """Perform a single validation step with multimodal inputs."""
-        batch = self.apply_batch_transform(batch, self.val_transform)
+        if hasattr(self, "val_transform"):
+            batch = self.apply_batch_transform(batch, self.val_transform)
 
         for key, value in batch.items():
             if isinstance(value, torch.Tensor):
@@ -649,36 +659,3 @@ class MultimodalRunner(EpochBasedRunner):
                 metrics = {k: torch.tensor(v, device=self.device) for k, v in metrics.items()}
 
         return {"loss": loss, **metrics}
-
-    def run(self) -> None:
-        """Run the training, validation, and testing process."""
-        # Build components
-        self.build_model()
-        self.build_dataset()
-
-        for dataset in [self.train_dataset, self.val_dataset, self.test_dataset]:
-            if dataset:
-                dataset.transform = None
-
-        dataset_config = self.config.get("dataset", {})
-        for split in ["train", "val", "test"]:
-            transform_configs = dataset_config.get("transforms", {}).get(split, {})
-            if transform_configs:
-                transform = build_transform_pipeline(transform_configs)
-                self.__setattr__(f"{split}_transform", transform)
-
-        self.build_dataloader()
-        self.build_loss()
-        self.build_metrics()
-        self.build_optimizer()
-
-        # Run training
-        self.train()
-
-        # Run validation
-        val_metrics = self.validate()
-        self.logger.info(f"Validation metrics: {val_metrics}")
-
-        # Run testing
-        test_metrics = self.test()
-        self.logger.info(f"Test metrics: {test_metrics}")

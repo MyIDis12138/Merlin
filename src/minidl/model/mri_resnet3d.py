@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from minidl.layers.attention_layers import MultiHeadAttention
+from minidl.layers.positional_embeddings import FactorizedPositionalEmbedding3D
 from minidl.layers.resnet3d import resnet3d18, resnet3d34, resnet3d50
 from minidl.model.model_registry import ModelRegistry
 from minidl.utils.pretrained_loader import load_pretrained_weights
@@ -175,18 +176,18 @@ class MRI_ResNet3D(nn.Module):
             nn.AdaptiveAvgPool3d(1), nn.Conv3d(d_model * 3, d_model, 1), nn.GELU(), nn.Conv3d(d_model, d_model * 3, 1), nn.Sigmoid()
         )
 
-        self.position_embeddings = nn.Embedding(3, d_model * 3)
+        self.position_embeddings = FactorizedPositionalEmbedding3D(self.d_model, 3, 5, 5)
         self.attention = MultiHeadAttention(d_model * 3, 8)
 
         self.feed_forward = nn.Sequential(
             nn.Linear(d_model * 6, d_model * 12),
             nn.GELU(),
-            nn.Linear(d_model * 12, d_model * 3),
+            nn.Linear(d_model * 12, d_model * 6),
             nn.GELU(),
         )
         self.layer_norm = nn.LayerNorm(d_model * 6)
 
-        self.classifier = nn.Sequential(nn.Linear(d_model * 3, d_model * 6), nn.GELU(), nn.Dropout(out_dropout), nn.Linear(d_model * 6, n_classes))
+        self.classifier = nn.Sequential(nn.Linear(d_model * 6, d_model * 12), nn.GELU(), nn.Dropout(out_dropout), nn.Linear(d_model * 12, n_classes))
 
         self._initialize_weights()
 
@@ -248,14 +249,11 @@ class MRI_ResNet3D(nn.Module):
         attn = self.spatial_attention(V)  # [B, 3 * d_model, 1, 1, 1]
         V = V * attn  # [B,  3 * d_model, D, H, W]
 
-        V = V.view(B, C, -1).transpose(1, 2)  # [B, D * H * W, 3 * d_model]
+        V = V.view(B, 3 * self.d_model, -1).transpose(1, 2)
 
-        position_ids = torch.arange(D * H * W, device=V.device).unsqueeze(0).expand(B, -1)  # [B, D * H * W]
-        position_embeddings = self.position_embeddings(position_ids)  # [B, D * H * W, 3 * d_model]
+        V = self.position_embeddings.add_to_input(V, D, H, W)
 
-        V_prev = V + position_embeddings
-
-        attn_output, _ = self.attention(V_prev, V_prev, V_prev)  # [B, D * H * W, 3 * d_model]
+        attn_output, _ = self.attention(V, V, V)  # [B, D * H * W, 3 * d_model]
 
         attn_output = attn_output.transpose(1, 2).view(B, C, D, H, W)
         x_avg = F.adaptive_avg_pool3d(attn_output, 1).squeeze(-1).squeeze(-1).squeeze(-1)  # [B, 3 * d_model]

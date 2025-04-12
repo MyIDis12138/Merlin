@@ -13,99 +13,10 @@ from minidl.utils.pretrained_loader import load_pretrained_weights
 logger = logging.getLogger(__name__)
 
 
-@ModelRegistry.register("resnet3d_model")
-class ResNet3DMRIModel(nn.Module):
-    def __init__(
-        self,
-        backbone: str = "resnet18",
-        input_channels: int = 1,
-        n_classes: int = 2,
-        pretrained: bool = False,
-        pretrained_model: str = "",
-        out_dropout: float = 0.3,
-        **kwargs,
-    ):
-        super().__init__()
-        self.backbone = backbone
-
-        if backbone == "resnet18":
-            self.backbone = resnet3d18(input_channels=input_channels, num_classes=n_classes)
-        elif backbone == "resnet34":
-            self.backbone = resnet3d34(input_channels=input_channels, num_classes=n_classes)
-        elif backbone == "resnet50":
-            self.backbone = resnet3d50(input_channels=input_channels, num_classes=n_classes)
-        else:
-            raise ValueError(f"Unsupported backbone: {backbone}")
-
-        if backbone in ["resnet18", "resnet34"]:
-            feature_dim = 512
-        else:
-            feature_dim = 2048
-
-        if pretrained:
-            self.backbone = load_pretrained_weights(model=self.backbone, pretrained=pretrained, model_name=pretrained_model)
-            logger.info(f"Loaded pretrained weights for {backbone}")
-
-        self.backbone.fc = nn.Identity()
-
-        self.shared_extractor = self.backbone
-
-        self.avgpool = nn.AdaptiveAvgPool3d((1, 1, 1))
-        self.classifier = nn.Sequential(
-            nn.Linear(feature_dim * 3, feature_dim * 2), nn.GELU(), nn.Dropout(out_dropout), nn.Linear(feature_dim * 2, n_classes)
-        )
-
-    def _load_pretrained_weights(self, pretrained_path: str):
-        """Load pretrained weights from a file"""
-        try:
-            pretrained_dict = torch.load(pretrained_path, map_location="cpu")
-
-            if "state_dict" in pretrained_dict:
-                pretrained_dict = pretrained_dict["state_dict"]
-
-            model_dict = self.backbone.state_dict()
-
-            if "conv1.weight" in pretrained_dict and pretrained_dict["conv1.weight"].shape[1] != self.backbone.conv1.weight.shape[1]:
-                if self.backbone.conv1.weight.shape[1] == 1 and pretrained_dict["conv1.weight"].shape[1] == 3:
-                    conv1_weight = pretrained_dict["conv1.weight"]
-                    pretrained_dict["conv1.weight"] = conv1_weight.mean(dim=1, keepdim=True)
-                elif self.backbone.conv1.weight.shape[1] > pretrained_dict["conv1.weight"].shape[1]:
-                    conv1_weight = pretrained_dict["conv1.weight"]
-                    pretrained_dict["conv1.weight"] = conv1_weight.repeat(1, self.backbone.conv1.weight.shape[1] // conv1_weight.shape[1], 1, 1, 1)
-
-            pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict and "fc" not in k}
-
-            model_dict.update(pretrained_dict)
-            self.backbone.load_state_dict(model_dict)
-            print(f"Successfully loaded pretrained weights from {pretrained_path}")
-        except Exception as e:
-            print(f"Failed to load pretrained weights: {e}")
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: batch of 3 MRI images [B, 3, D, H, W]
-        features = []
-
-        for i in range(3):
-            # Extract individual MRI sequence
-            mri = x[:, i : i + 1]  # [B, 1, D, H, W]
-
-            feat = self.shared_extractor.forward_features(mri)
-
-            features.append(feat)
-
-        combined_features = torch.cat(features, dim=1)  # [B, d_model*3]
-
-        combined_features = self.avgpool(combined_features)
-        combined_features = torch.flatten(combined_features, 1)
-        logits = self.classifier(combined_features)
-
-        return logits
-
-
-@ModelRegistry.register("mri_resnet3d")
-class MRI_ResNet3D(nn.Module):
+@ModelRegistry.register("multimodal_resnet3d")
+class MultiModal_ResNet3D(nn.Module):
     """
-    ResNet3D-based model for MRI analysis using pre-trained weights.
+    ResNet3D-based model for MRI analysis and clinical features using pre-trained weights.
     This model serves as a drop-in replacement for the existing MRI_baseline model,
     but uses a 3D ResNet backbone with optional pre-trained weights.
 
@@ -120,6 +31,8 @@ class MRI_ResNet3D(nn.Module):
 
     def __init__(
         self,
+        d_clinical: int = 86,
+        clinical_dropout: float = 0.1,
         n_classes: int = 2,
         d_model: int = 256,
         out_dropout: float = 0.3,
@@ -189,6 +102,17 @@ class MRI_ResNet3D(nn.Module):
 
         self.classifier = nn.Sequential(nn.Linear(d_model * 6, d_model * 12), nn.GELU(), nn.Dropout(out_dropout), nn.Linear(d_model * 12, n_classes))
 
+        self.clinlical_mlp = nn.Sequential(
+            nn.Linear(d_clinical, d_model * 8),
+            nn.GELU(),
+            nn.Dropout(clinical_dropout),
+            nn.Linear(d_model * 8, d_model * 8),
+            nn.GELU(),
+            nn.Dropout(clinical_dropout),
+            nn.Linear(d_model * 8, d_model * 3),
+            nn.GELU(),
+        )
+
         self._initialize_weights()
 
     def _initialize_weights(self):
@@ -233,6 +157,8 @@ class MRI_ResNet3D(nn.Module):
             Output tensor of shape [B, n_classes]
         """
         # x: tensor of 3 MRI images, shaped [B, 3, D, H, W]
+        clinical_feat = self.clinlical_mlp(x["clinical_features"])
+
         x = x["images"]
         features = []
 
@@ -254,7 +180,9 @@ class MRI_ResNet3D(nn.Module):
 
         V = self.position_embeddings.add_to_input(V, D, H, W)
 
-        attn_output, _ = self.attention(V, V, V)  # [B, D * H * W, 3 * d_model]
+        clinical_k = clinical_feat.unsqueeze(1)  # (B, 1, C_cat)
+        clinical_v = clinical_feat.unsqueeze(1)  # (B, 1, C_cat)
+        attn_output, _ = self.attention(V, clinical_k, clinical_v)  # [B, D * H * W, 3 * d_model]
 
         attn_output = attn_output.transpose(1, 2).view(B, C, D, H, W)
         x_avg = F.adaptive_avg_pool3d(attn_output, 1).squeeze(-1).squeeze(-1).squeeze(-1)  # [B, 3 * d_model]

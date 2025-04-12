@@ -1,5 +1,5 @@
 runner:
-  name: "epoch_based_runner"
+  name: "epoch_based_multimodal_runner"
   max_epochs: 5
 
   hooks:
@@ -7,7 +7,7 @@ runner:
       params:
         checkpoint_path: "work_dirs/experiments/recurrance_mri_baseline_dmodel_256_lr1e4"
         strict: true
-        enable: true
+        enable: false
 
     - name: "tensorboard_logger_hook"
       params:

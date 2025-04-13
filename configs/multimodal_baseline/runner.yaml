@@ -29,9 +29,8 @@ runner:
   hooks:
     - name: "checkpoint_loader_hook"
       params:
-        checkpoint_path: "work_dirs/experiments/recurrance_mri_baseline_dmodel_256_lr1e4"
         strict: true
-        enable: false
+        enable: true
 
     - name: "tensorboard_logger_hook"
       params:
@@ -40,10 +39,7 @@ runner:
 
     - name: "checkpoint_saver_hook"
       params:
-        interval: 10
-        save_optimizer: true
-        save_scheduler: true
-        out_dir: "checkpoints"
+        interval: 1
         max_keep_ckpts: 5
         save_best: true
 

@@ -1,9 +1,0 @@
-model:
-  name: resnet3d_model
-  params:
-    n_classes: 2
-    d_model: 256
-    out_dropout: 0.3
-    backbone: resnet18
-    pretrained: true
-    pretrained_model: resnet3d_18_med3d

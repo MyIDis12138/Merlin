@@ -1,11 +1,34 @@
 runner:
-  name: "epoch_based_runner"
+  name: "epoch_based_multimodal_runner"
   max_epochs: 5
+  transforms:
+    train:
+      - name: "ToTensor"
+        params:
+          device: "cuda"
+
+      - name: "RandomBiasField"
+
+      - name: "RandomMotion"
+        params:
+          num_transforms: 3
+          prob: 0.5
+
+      - name: "RandomFlip"
+        params:
+          axes: 2
+          flip_probability: 0.5
+
+      - name: "RandomNoise"
+        params:
+          mean: 9
+          std: [0.1, 0.5]
+
+      - name: "Normalize"
 
   hooks:
     - name: "checkpoint_loader_hook"
       params:
-        checkpoint_path: "work_dirs/experiments/recurrance_mri_baseline_dmodel_256_lr1e4"
         strict: true
         enable: true
 
@@ -16,10 +39,7 @@ runner:
 
     - name: "checkpoint_saver_hook"
       params:
-        interval: 10
-        save_optimizer: true
-        save_scheduler: true
-        out_dir: "checkpoints"
+        interval: 1
         max_keep_ckpts: 5
         save_best: true
 

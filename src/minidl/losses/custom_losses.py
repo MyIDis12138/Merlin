@@ -92,11 +92,21 @@ class FocalLoss(nn.Module):
         reduction: Reduction method
     """
 
-    def __init__(self, alpha: float = 0.25, gamma: float = 2.0, reduction: str = "mean"):
+    def __init__(self, alpha: float | list = 0.25, gamma: float = 2.0, reduction: str = "mean", epsilon=1e-6):
         super().__init__()
-        self.alpha = alpha
+
+        if isinstance(alpha, (list, tuple)):
+            self.alpha = torch.tensor(alpha)
+        elif isinstance(alpha, (float, int)):
+            if not 0 <= alpha <= 1:
+                print(f"Warning: Scalar alpha={alpha} is outside the typical [0, 1] range.")
+            self.alpha = float(alpha)
+        else:
+            raise TypeError("Argument 'alpha' must be float, list, tuple.")
+
         self.gamma = gamma
         self.reduction = reduction
+        self.epsilon = epsilon
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """Forward pass.
@@ -108,9 +118,23 @@ class FocalLoss(nn.Module):
         Returns:
             Computed loss
         """
+        num_classes = inputs.shape[1]
         ce_loss = F.cross_entropy(inputs, targets, reduction="none")
         pt = torch.exp(-ce_loss)
-        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+
+        if isinstance(self.alpha, float):
+            alpha_factor = self.alpha
+        elif isinstance(self.alpha, torch.Tensor):
+            if self.alpha.device != inputs.device:
+                self.alpha = self.alpha.to(inputs.device)
+            if len(self.alpha) != num_classes:
+                raise ValueError(f"Length of alpha tensor ({len(self.alpha)}) " f"must match number of classes ({num_classes}).")
+
+            alpha_factor = self.alpha[targets]
+        else:
+            raise TypeError("Internal error: self.alpha is not float or tensor.")
+
+        focal_loss = alpha_factor * (1 - pt + self.epsilon) ** self.gamma * ce_loss
 
         if self.reduction == "mean":
             return focal_loss.mean()

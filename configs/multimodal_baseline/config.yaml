@@ -10,8 +10,8 @@ environment:
   device: "cuda"
 
 experiment:
-  name: "recurrance_dmodel_256_lr1e5"
-  work_dir: "work_dirs/experiments/recurrance_dmodel_256_lr1e5"
+  name: "recurrance_mri_baseline_dmodel_256_lr1e4"
+  work_dir: "work_dirs/experiments/recurrance_mri_baseline_dmodel_256_lr1e4"
   tags:
     - "baseline"
     - "clinical_label"

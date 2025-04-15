@@ -8,6 +8,7 @@ import torch
 import yaml
 
 from minidl.runner import RunnerBuilder
+from minidl.utils.seed import set_seed
 
 
 def get_log_level(level_str):
@@ -219,6 +220,10 @@ def main():
         device = torch.device(args.device)
     elif config.get("environment", {}).get("device"):
         device = torch.device(config["environment"]["device"])
+
+    seed = config.get("environment", {}).get("seed", 42)
+    set_seed(seed)
+    logger.info(f"Set random seed to {seed}")
 
     try:
         logger.info("Initializing runner...")

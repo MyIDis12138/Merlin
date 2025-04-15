@@ -439,7 +439,7 @@ class ClinicalDataRandomForest:
         y_pred_proba_test = self.final_model.predict_proba(self.X_test)[:, 1]
 
         test_accuracy = accuracy_score(self.y_test, y_pred_test)
-        test_f1 = f1_score(self.y_test, y_pred_test, average="binary")
+        test_f1 = f1_score(self.y_test, y_pred_test, average="weighted")
 
         logger.info(f"Test Set Accuracy: {test_accuracy:.4f}")
         logger.info(f"Test Set F1 Score: {test_f1:.4f}")
@@ -495,12 +495,12 @@ class ClinicalDataRandomForest:
 
             # Validation evaluation
             val_preds = fold_model.predict(X_val_fold)
-            val_f1 = f1_score(y_val_fold, val_preds, average="binary")
+            val_f1 = f1_score(y_val_fold, val_preds, average="weighted")
             val_accuracy = accuracy_score(y_val_fold, val_preds)
 
             # Test evaluation
             test_preds = fold_model.predict(self.X_test)
-            test_f1 = f1_score(self.y_test, test_preds, average="binary")
+            test_f1 = f1_score(self.y_test, test_preds, average="weighted")
             test_accuracy = accuracy_score(self.y_test, test_preds)
 
             fold_results.append(

@@ -1,18 +1,22 @@
-global_batch_size: &global_batch_size 8
-global_num_workers: &global_num_workers 0
+global_batch_size: &global_batch_size 16
+global_num_workers: &global_num_workers 16
 
 dataset:
-  name: "bmri_dataset"
+  name: "multimodal_dataset"
   params:
     root_dir: "data/Duke-Breast-Cancer-MRI"
     clinical_data_path: "data/Clinical_and_Other_Features.xlsx"
-    clinical_features_columns:
-      - ['MRI Technical Information', 'Columns', '320=0,448=1,512=2']
-      - ['Tumor Characteristics', 'Staging(Metastasis)#(Mx -replaced by -1)[M]', '']
-      - ['MRI Findings', 'Lymphadenopathy or Suspicious Nodes', '{0 = no, 1 = yes}']
     clinical_label: ['Recurrence', 'Recurrence event(s)', '{0 = no, 1 = yes}']
-    # ["Tumor Characteristics", "Mol Subtype", "{0 = luminal-like,\n1 = ER/PR pos, HER2 pos,\n2 = her2,\n3 = trip neg}",]
-    # batch_size: *global_batch_size
+    clinical_features_filter_dict:
+      0: [ "Follow Up", "US features"]
+    clinical_features_exclude_columns:
+      - ['Recurrence', 'Days to local recurrence (from the date of diagnosis)', '']
+      - ['Recurrence', 'Days to distant recurrence(from the date of diagnosis)', '']
+      - ['Tumor Characteristics', 'Staging(Tumor Size)# [T]', '']
+      - ['Mammography Characteristics', 'Tumor Size (cm)', '']
+      - ['MRI Technical Information', 'Image Position of Patient', '']
+      - ['Tumor Characteristics', 'Position', 'Position (every bx positive for invasive cancer)(used during annotation)']
+    max_workers: 8
 
   indices:
     train: [358]
@@ -26,34 +30,15 @@ dataset:
     target_size: &target_size [144, 96, 144]
     train:
       - name: "ToTensor"
-        params:
-          device: "cuda"
+
       - name: "Resize"
         params:
           target_size: *target_size
           mode: "bilinear"
 
-      - name: "RandomBiasField"
-
-      - name: "RandomMotion"
-        params:
-          num_transforms: 2
-          prob: 0.5
-
-      - name: "RandomFlip"
-        params:
-          axes: 2
-          flip_probability: 0.5
-
-      - name: "RandomNoise"
-        params:
-          mean: 9
-          std: [0.1, 0.5]
-
-      - name: "Normalize"
-
     val:  # Transforms for validation set
       - name: "ToTensor"
+
       - name: "Resize"
         params:
           target_size: *target_size
@@ -61,6 +46,7 @@ dataset:
 
     test:  # Transforms for test set
       - name: "ToTensor"
+
       - name: "Resize"
         params:
           target_size: *target_size

@@ -1,5 +1,5 @@
 model:
-  name: resnet3d_model
+  name: mri_resnet3d
   params:
     n_classes: 2
     d_model: 256

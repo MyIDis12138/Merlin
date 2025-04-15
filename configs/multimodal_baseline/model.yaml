@@ -1,8 +1,8 @@
 model:
-  name: resnet3d_model
+  name: multimodal_resnet3d
   params:
     n_classes: 2
-    d_model: 256
+    d_model: 64
     out_dropout: 0.3
     backbone: resnet18
     pretrained: true

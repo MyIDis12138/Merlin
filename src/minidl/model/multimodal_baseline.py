@@ -95,19 +95,22 @@ class MultiModal_ResNet3D(nn.Module):
         self.feed_forward = nn.Sequential(
             nn.Linear(d_model * 6, d_model * 12),
             nn.GELU(),
+            nn.Linear(d_model * 12, d_model * 12),
+            nn.GELU(),
             nn.Linear(d_model * 12, d_model * 6),
             nn.GELU(),
         )
         self.layer_norm = nn.LayerNorm(d_model * 6)
 
         self.classifier = nn.Sequential(
-            nn.Linear(d_model * 6, d_model * 12), 
-            nn.GELU(), 
-            nn.Dropout(out_dropout), 
-            nn.Linear(d_model * 12, d_model * 12), 
-            nn.GELU(), 
-            nn.Dropout(out_dropout), 
-            nn.Linear(d_model * 12, n_classes))
+            nn.Linear(d_model * 6, d_model * 12),
+            nn.GELU(),
+            nn.Dropout(out_dropout),
+            nn.Linear(d_model * 12, d_model * 12),
+            nn.GELU(),
+            nn.Dropout(out_dropout),
+            nn.Linear(d_model * 12, n_classes),
+        )
 
         self.clinlical_mlp = nn.Sequential(
             nn.Linear(d_clinical, d_model * 8),
@@ -204,7 +207,8 @@ class MultiModal_ResNet3D(nn.Module):
 
         return logits
 
-@ModelRegistry.register("multimodal_resnet3d_v2")
+
+@ModelRegistry.register("multimodal_resnet3d_V2")
 class MultiModal_ResNet3D_V2(nn.Module):
     """
     ResNet3D-based model for MRI analysis and clinical features using pre-trained weights.
@@ -286,12 +290,24 @@ class MultiModal_ResNet3D_V2(nn.Module):
         self.feed_forward = nn.Sequential(
             nn.Linear(d_model * 6, d_model * 12),
             nn.GELU(),
+            nn.Linear(d_model * 12, d_model * 12),
+            nn.GELU(),
             nn.Linear(d_model * 12, d_model * 6),
             nn.GELU(),
         )
+
+        self.attn_norm = nn.LayerNorm(75, d_model * 3)
         self.layer_norm = nn.LayerNorm(d_model * 6)
 
-        self.classifier = nn.Sequential(nn.Linear(d_model * 6, d_model * 12), nn.GELU(), nn.Dropout(out_dropout), nn.Linear(d_model * 12, n_classes))
+        self.classifier = nn.Sequential(
+            nn.Linear(d_model * 6, d_model * 12),
+            nn.GELU(),
+            nn.Dropout(out_dropout),
+            nn.Linear(d_model * 12, d_model * 12),
+            nn.GELU(),
+            nn.Dropout(out_dropout),
+            nn.Linear(d_model * 12, n_classes),
+        )
 
         self.clinlical_mlp = nn.Sequential(
             nn.Linear(d_clinical, d_model * 8),
@@ -366,15 +382,16 @@ class MultiModal_ResNet3D_V2(nn.Module):
 
         attn = self.spatial_attention(V)  # [B, 3 * d_model, 1, 1, 1]
         V = V * attn  # [B,  3 * d_model, D, H, W]
-        x_avg = F.adaptive_avg_pool3d(V, 1).squeeze(-1).squeeze(-1).squeeze(-1)
 
         V = V.view(B, 3 * self.d_model, -1).transpose(1, 2)
 
-        V = self.position_embeddings.add_to_input(V, D, H, W)
+        V_pos = self.position_embeddings.add_to_input(V, D, H, W)
 
         clinical_k = clinical_feat.unsqueeze(1)  # (B, 1, C_cat)
         clinical_v = clinical_feat.unsqueeze(1)  # (B, 1, C_cat)
-        attn_output, _ = self.attention(V, clinical_k, clinical_v)  # [B, D * H * W, 3 * d_model]
+        attn_output, _ = self.attention(V_pos, clinical_k, clinical_v)  # [B, D * H * W, 3 * d_model]
+
+        attn_output = self.attn_norm(V_pos, attn_output)
 
         attn_output = attn_output.transpose(1, 2).view(B, C, D, H, W)
         x_avg = F.adaptive_avg_pool3d(attn_output, 1).squeeze(-1).squeeze(-1).squeeze(-1)  # [B, 3 * d_model]

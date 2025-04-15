@@ -30,7 +30,7 @@ runner:
     - name: "checkpoint_loader_hook"
       params:
         strict: true
-        enable: true
+        enable: false
 
     - name: "tensorboard_logger_hook"
       params:
@@ -40,7 +40,7 @@ runner:
     - name: "checkpoint_saver_hook"
       params:
         interval: 1
-        max_keep_ckpts: 5
+        max_keep_ckpts: 3
         save_best: true
 
     - name: "wandb_logger_hook"

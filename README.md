@@ -24,8 +24,7 @@ uv pip install -e .[dev]
 
 
 ### Experiment script
-To reproduce our results:
 ```
 source .venv/bin/activate
-python src/run.py configs/multimodal_baseline/config.yaml
+python src/run.py configs/config.yaml
 ```

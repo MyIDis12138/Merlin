@@ -47,11 +47,13 @@ class MultiModalBreastMRIDataset(Dataset):
         3. Integration and preprocessing of clinical data from Excel file
         4. Support for flexible data transformation pipelines
         5. Comprehensive data validation and error handling
+        6. Proper handling of train/validation/test splits to prevent data leakage
 
     Return Format:
         Each sample returns a dictionary containing:
         - 'images': Tensor of shape [3, D, H, W] representing 3D images at 3 timepoints
         - 'patient_id': Patient identifier
+        - 'clinical_features': Preprocessed clinical features vector
         - 'clinical_label': clinical_label (if clinical data is provided)
 
     Args:
@@ -67,11 +69,8 @@ class MultiModalBreastMRIDataset(Dataset):
         transform (callable, optional): Transform pipeline for image preprocessing
         patient_indices (list[int], optional): List of Breast_MRI_XXX indices to load
         max_workers (int): Maximum number of worker threads for parallel processing
-
-    Raises:
-        FileNotFoundError: When root directory doesn't exist or no valid Breast_MRI_XXX directories found
-        RuntimeError: When no valid patient data or required dynamic sequences not found
-        ValueError: When patient indices are out of range or invalid
+        training_patient_ids (list[str], optional): List of patient IDs in the training set.
+            Used to fit preprocessors (imputers, scalers) on training data only.
     """
 
     def __init__(
@@ -84,6 +83,7 @@ class MultiModalBreastMRIDataset(Dataset):
         transform: Callable = None,
         patient_indices: list[int] = None,
         max_workers: int = 4,
+        training_patient_ids: list[str] = None,
     ):
         self.root_dir = root_dir
         self.transform = transform
@@ -93,26 +93,21 @@ class MultiModalBreastMRIDataset(Dataset):
         self.clinical_features_exclude_columns = clinical_features_exclude_columns
         self.clinical_ID_col = ("Patient Information", "Patient ID", "")
         self.max_workers = max_workers
+        self.training_patient_ids = [f"Breast_MRI_{pid:03}" for pid in training_patient_ids]
 
-        # Required sequence phases
         self.required_phases = ["Ph1", "Ph2", "Ph3"]
 
-        # Initialize thread pool
         self.thread_pool = ThreadPoolExecutor(max_workers=self.max_workers)
 
-        # Load and process clinical data first (we need this for patient matching)
         self._initialize_clinical_data()
 
-        # Then initialize patient directory data
         self._initialize_patient_data(patient_indices)
 
     def _initialize_clinical_data(self) -> None:
         """Initialize clinical data from Excel file and process it."""
         try:
-            # Load data with multi-index header
             self.clinical_df = pd.read_excel(self.clinical_data_path, header=[0, 1, 2])
 
-            # Clean up unnamed columns in multi-index
             new_cols = []
             for col in self.clinical_df.columns:
                 if isinstance(col, tuple) and isinstance(col[-1], str) and "Unnamed" in col[-1]:
@@ -124,7 +119,6 @@ class MultiModalBreastMRIDataset(Dataset):
             logger.info(f"Successfully loaded clinical data from {self.clinical_data_path}")
             logger.info(f"Clinical data shape: {self.clinical_df.shape}")
 
-            # Process the clinical data
             self._process_clinical_features()
 
         except FileNotFoundError:
@@ -136,26 +130,21 @@ class MultiModalBreastMRIDataset(Dataset):
 
     def _process_clinical_features(self) -> None:
         """Process clinical features: filter columns, handle missing values, encode categorical features."""
-        # Store the original clinical dataframe for reference
         df_processed = self.clinical_df.copy()
 
-        # Apply filters if provided
         if self.clinical_features_filter_dict is not None or self.clinical_features_exclude_columns is not None:
             df_processed = self._filter_clinical_features(df_processed)
 
-        # Make sure target column is present
         if self.clinical_label not in df_processed.columns:
             logger.error(f"Error: Target column {self.clinical_label} not found in the clinical data")
             logger.info(f"Available columns: {df_processed.columns}")
             raise ValueError(f"Target column {self.clinical_label} not found in the clinical data")
 
-        # Remove rows with missing target values
         initial_rows = len(df_processed)
         df_processed.dropna(subset=[self.clinical_label], inplace=True)
         rows_after_dropna = len(df_processed)
         logger.info(f"Removed {initial_rows - rows_after_dropna} rows with missing target values")
 
-        # Convert target column to integer
         try:
             df_processed[self.clinical_label] = df_processed[self.clinical_label].astype(int)
             logger.info(f"Target column distribution:\n{df_processed[self.clinical_label].value_counts(normalize=True)}")
@@ -163,35 +152,51 @@ class MultiModalBreastMRIDataset(Dataset):
             logger.error(f"Error converting target column to integer: {e}")
             raise
 
-        # Store target values
         self.clinical_y = df_processed[self.clinical_label]
 
-        # Remove target column from features and ensure ID column is kept separately
         id_series = df_processed[self.clinical_ID_col]
 
-        # Remove both target column and ID column from features
-        clinical_X = df_processed.drop(columns=[self.clinical_label, self.clinical_ID_col])
+        if self.training_patient_ids is not None:
+            training_mask = id_series.isin(self.training_patient_ids)
+            training_df = df_processed[training_mask]
+            logger.info(f"Using {len(training_df)} patients for fitting preprocessors")
+            if len(training_df) == 0:
+                logger.warning("No matching patients found in training set. Check training_patient_ids.")
+                training_df = df_processed
+                logger.warning("Falling back to using all data for fitting preprocessors.")
+        else:
+            training_df = df_processed
+            logger.warning("No training patient IDs provided. Using all patients for fitting preprocessors.")
 
-        # Store original columns for reference
+        clinical_X = df_processed.drop(columns=[self.clinical_label, self.clinical_ID_col])
+        training_X = training_df.drop(columns=[self.clinical_label, self.clinical_ID_col])
+
         original_X_columns = clinical_X.columns.copy()
 
-        # Flatten multi-index column names for easier processing
-        flat_X_columns = ["_".join(filter(None, map(str, col))).strip("_") for col in original_X_columns]
-        clinical_X.columns = flat_X_columns
+        def normalize_column_name(col):
+            if isinstance(col, tuple):
+                col_str = "_".join(filter(None, map(str, col))).strip("_")
+            else:
+                col_str = str(col)
+            return col_str
 
-        # Create a mapping from flat column names to original multi-level columns
+        self.normalize_column_name = normalize_column_name
+
+        flat_X_columns = [normalize_column_name(col) for col in original_X_columns]
+        clinical_X.columns = flat_X_columns
+        training_X.columns = flat_X_columns
+
         self.column_mapping = dict(zip(clinical_X.columns, original_X_columns))
 
-        # Identify numerical and categorical columns
         numerical_cols = []
         categorical_cols = []
 
         for i, col in enumerate(clinical_X.columns):
             original_col_tuple = original_X_columns[i]
-            # Try to convert to numeric, setting errors to 'coerce'
             clinical_X[col] = pd.to_numeric(clinical_X[col], errors="coerce")
+            if not training_X.empty:
+                training_X[col] = pd.to_numeric(training_X[col], errors="coerce")
 
-            # Use original column data to determine type
             original_col_data_series = df_processed[original_col_tuple]
 
             if pd.api.types.is_numeric_dtype(clinical_X[col]) and not clinical_X[col].isnull().all():
@@ -199,100 +204,139 @@ class MultiModalBreastMRIDataset(Dataset):
             else:
                 categorical_cols.append(col)
                 clinical_X[col] = original_col_data_series.astype(str)
+                if not training_X.empty:
+                    training_X[col] = training_df[original_col_tuple].astype(str)
 
         logger.info(f"Identified {len(numerical_cols)} numerical columns")
         logger.info(f"Identified {len(categorical_cols)} categorical columns")
 
-        # Handle missing values in numerical columns
+        self.numerical_cols = numerical_cols
+        self.categorical_cols = categorical_cols
+
         if numerical_cols:
-            self.num_imputer = SimpleImputer(strategy="mean")
-            clinical_X[numerical_cols] = self.num_imputer.fit_transform(clinical_X[numerical_cols])
-            logger.info("Imputed missing values in numerical columns using mean")
+            self.num_cols_for_imputer = numerical_cols.copy()
+
+        if numerical_cols:
+            self.num_imputer = SimpleImputer(strategy="mean", keep_empty_features=True)
+            self.num_imputer.fit(training_X[numerical_cols])
+            logger.info("Fitted numerical imputer on training data only")
 
             self.scaler = StandardScaler()
-            clinical_X[numerical_cols] = self.scaler.fit_transform(clinical_X[numerical_cols])
-            logger.info("Normalized numerical columns using StandardScaler")
+            self.scaler.fit(self.num_imputer.transform(training_X[numerical_cols]))
+            logger.info("Fitted scaler on training data only")
 
-        # Handle categorical columns
         if categorical_cols:
-            # Impute missing values in categorical columns
-            self.cat_imputer = SimpleImputer(strategy="constant", fill_value="Missing")
-            clinical_X[categorical_cols] = self.cat_imputer.fit_transform(clinical_X[categorical_cols])
-            logger.info("Imputed missing values in categorical columns with 'Missing'")
+            self.cat_imputer = SimpleImputer(strategy="constant", fill_value="Missing", keep_empty_features=True)
+            self.cat_imputer.fit(training_X[categorical_cols])
+            logger.info("Fitted categorical imputer on training data only")
 
-            # Store the mapping for categorical features before one-hot encoding
             self.categorical_mapping = {}
             for cat_col in categorical_cols:
                 original_col = self.column_mapping[cat_col]
-                unique_vals = clinical_X[cat_col].unique()
+                unique_vals = training_X[cat_col].unique()
                 for val in unique_vals:
-                    # Create mappings for the one-hot encoded columns that will be created
                     encoded_col = f"{cat_col}_{val}"
                     self.categorical_mapping[encoded_col] = (original_col, val)
 
-            # Apply one-hot encoding
-            clinical_X = pd.get_dummies(clinical_X, columns=categorical_cols, drop_first=True, dummy_na=False, dtype=int)
-            logger.info("Applied one-hot encoding to categorical columns")
-            logger.info(f"Clinical data shape after encoding: {clinical_X.shape}")
+            self.dummy_columns = {}
+            for cat_col in categorical_cols:
+                unique_vals = training_X[cat_col].unique()
+                if len(unique_vals) > 0:
+                    self.dummy_columns[cat_col] = [f"{cat_col}_{val}" for val in unique_vals[1:]]
 
-            # Update the column mapping with the one-hot encoded columns
-            for encoded_col in clinical_X.columns:
-                if encoded_col in self.column_mapping:
-                    continue  # Skip columns that already have a mapping
+        if categorical_cols:
+            temp_X = training_X.copy()
+            if numerical_cols:
+                temp_X[numerical_cols] = self.num_imputer.transform(temp_X[numerical_cols])
 
-                # Try to find the base column name
-                for cat_col in categorical_cols:
-                    if encoded_col.startswith(cat_col + "_"):
-                        value = encoded_col[len(cat_col) + 1 :]
-                        self.column_mapping[encoded_col] = (self.column_mapping[cat_col], value)
-                        break
+            temp_X[categorical_cols] = self.cat_imputer.transform(temp_X[categorical_cols])
+            dummies = pd.get_dummies(temp_X[categorical_cols], drop_first=True, dummy_na=False, dtype=int)
 
-            # Clean column names for compatibility
-            logger.info("Cleaning column names for compatibility...")
-            original_cols = clinical_X.columns.tolist()
-            clinical_X.columns = clinical_X.columns.str.replace(r"\[|\]|\<", "_", regex=True)
-            cleaned_cols = clinical_X.columns.tolist()
+            if numerical_cols:
+                final_X = pd.concat([temp_X[numerical_cols], dummies], axis=1)
+            else:
+                final_X = dummies
 
-            # Update column mapping after cleaning column names
-            cleaned_mapping = {}
-            for orig, clean in zip(original_cols, cleaned_cols):
-                if orig in self.column_mapping:
-                    cleaned_mapping[clean] = self.column_mapping[orig]
+            self.feature_names = final_X.columns.tolist()
+        else:
+            self.feature_names = numerical_cols
 
-            self.column_mapping = cleaned_mapping
-
-        # Final check for non-numeric columns
-        non_numeric_cols = clinical_X.select_dtypes(exclude=np.number).columns
-        if len(non_numeric_cols) > 0:
-            logger.warning(f"Found {len(non_numeric_cols)} non-numeric columns after processing. Attempting final conversion.")
-            for col in non_numeric_cols:
-                try:
-                    clinical_X[col] = pd.to_numeric(clinical_X[col], errors="coerce")
-                except Exception as e:
-                    logger.error(f"Could not convert column {col} to numeric: {e}")
-
-            final_numerical_cols = clinical_X.select_dtypes(include=np.number).columns
-            if clinical_X.isnull().any().any():
-                final_num_imputer = SimpleImputer(strategy="median")
-                clinical_X[final_numerical_cols] = final_num_imputer.fit_transform(clinical_X[final_numerical_cols])
-
-        # Store the processed clinical features and feature names
-        self.clinical_X = clinical_X
-        self.feature_names = clinical_X.columns.tolist()
-        logger.info(f"Final clinical feature shape: {self.clinical_X.shape}")
-
-        # Create a dictionary mapping patient IDs to their clinical data
         self.patient_to_clinical_data = {}
+
         for idx, (pid, _) in enumerate(zip(id_series, df_processed.iterrows())):
             if pid and not pd.isna(pid):
-                clinical_features = self.clinical_X.iloc[idx].values.astype(np.float32)
+                patient_features = self._process_single_patient_features(df_processed.iloc[idx], original_X_columns, numerical_cols, categorical_cols)
+
                 clinical_label = int(df_processed.iloc[idx][self.clinical_label])
                 self.patient_to_clinical_data[str(pid)] = {
-                    "clinical_features": clinical_features,
+                    "clinical_features": patient_features,
                     "clinical_label": clinical_label,
+                    "is_training": str(pid) in self.training_patient_ids if self.training_patient_ids else None,
                 }
 
         logger.info(f"Created clinical data mapping for {len(self.patient_to_clinical_data)} patients")
+        if self.training_patient_ids:
+            training_count = sum(1 for pid, data in self.patient_to_clinical_data.items() if data["is_training"])
+            logger.info(
+                f"Dataset contains {training_count} training patients and \
+                 {len(self.patient_to_clinical_data) - training_count} validation/test patients"
+            )
+
+    def _process_single_patient_features(self, patient_row, original_columns, numerical_cols, categorical_cols):
+        """Process features for a single patient to avoid data leakage"""
+        patient_data = {}
+        for col in original_columns:
+            if col != self.clinical_label and col != self.clinical_ID_col:
+                patient_data[col] = patient_row[col]
+
+        processed_features = {}
+
+        if numerical_cols:
+            num_data_dict = {}
+            for col in self.num_cols_for_imputer:
+                if col in self.column_mapping and self.column_mapping[col] in patient_data:
+                    # Convert to numeric safely
+                    try:
+                        val = float(patient_data[self.column_mapping[col]])
+                    except (ValueError, TypeError):
+                        val = np.nan
+                else:
+                    val = np.nan
+                num_data_dict[col] = val
+
+            num_df = pd.DataFrame([num_data_dict])
+
+            num_imputed = self.num_imputer.transform(num_df)
+
+            num_scaled = self.scaler.transform(num_imputed)
+
+            for i, col in enumerate(self.num_cols_for_imputer):
+                processed_features[col] = num_scaled[0, i]
+
+        if categorical_cols:
+            for cat_col in categorical_cols:
+                if cat_col in self.column_mapping:
+                    orig_col = self.column_mapping[cat_col]
+
+                    if orig_col in patient_data and not pd.isna(patient_data[orig_col]):
+                        cat_value = str(patient_data[orig_col])
+                    else:
+                        cat_value = "Missing"
+
+                    if cat_col in self.dummy_columns:
+                        for dummy_col in self.dummy_columns[cat_col]:
+                            val = dummy_col[len(cat_col) + 1 :]
+                            if val == cat_value:
+                                processed_features[dummy_col] = 1.0
+                            else:
+                                processed_features[dummy_col] = 0.0
+
+        feature_array = np.zeros(len(self.feature_names), dtype=np.float32)
+
+        for i, feat_name in enumerate(self.feature_names):
+            feature_array[i] = processed_features.get(feat_name, 0.0)
+
+        return feature_array
 
     def _filter_clinical_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -359,12 +403,10 @@ class MultiModalBreastMRIDataset(Dataset):
         Returns:
             list of valid MRI directory paths
         """
-        # Find all directories matching Breast_MRI_XXX pattern
         all_mri_dirs = glob.glob(os.path.join(self.root_dir, "Breast_MRI_*"))
         valid_mri_dirs = []
         dir_indices = {}
 
-        # Validate directory format and build index mapping
         for mri_dir in all_mri_dirs:
             dir_name = os.path.basename(mri_dir)
             if os.path.isdir(mri_dir) and re.match(r"Breast_MRI_\d+$", dir_name):
@@ -375,11 +417,9 @@ class MultiModalBreastMRIDataset(Dataset):
         if not valid_mri_dirs:
             raise FileNotFoundError(f"No valid Breast_MRI_XXX format directories found in {self.root_dir}")
 
-        # Sort directories by numerical order
         valid_mri_dirs.sort(key=lambda x: int(os.path.basename(x).split("_")[-1]))
         available_indices = sorted(dir_indices.keys())
 
-        # If patient indices are provided, filter Breast_MRI_XXX directories
         if patient_indices is not None:
             invalid_indices = [idx for idx in patient_indices if idx not in dir_indices]
             if invalid_indices:
@@ -402,11 +442,9 @@ class MultiModalBreastMRIDataset(Dataset):
         """
         folder_name = os.path.basename(sequence_folder)
 
-        # Check if it's a dynamic sequence first
         if not (("dyn" in folder_name.lower()) or ("vibrant" in folder_name.lower())):
             return None
 
-        # Identify specific phase
         if ("ph1" in folder_name.lower()) or ("1st" in folder_name.lower()):
             return "Ph1"
         elif ("ph2" in folder_name.lower()) or ("2nd" in folder_name.lower()):
@@ -432,11 +470,9 @@ class MultiModalBreastMRIDataset(Dataset):
         for mri_dir in mri_dirs:
             patient_subdirs = [d for d in glob.glob(os.path.join(mri_dir, "*")) if os.path.isdir(d)]
 
-            # Check each patient directory
             for patient_dir in patient_subdirs:
                 sequence_dirs = [d for d in glob.glob(os.path.join(patient_dir, "*")) if os.path.isdir(d)]
 
-                # Check if all required phases are available
                 phases_found = set()
                 for seq_dir in sequence_dirs:
                     phase = self._identify_phase(seq_dir)
@@ -447,13 +483,11 @@ class MultiModalBreastMRIDataset(Dataset):
                     patient_dirs.append(patient_dir)
                 else:
                     missing_phases = set(self.required_phases) - phases_found
-                    logger.warning(f"Warning: Patient directory {os.path.basename(patient_dir)} is missing required phases: {missing_phases}")
+                    logger.warning(f"Warning: Patient directory {os.path.basename(mri_dir)} is missing required phases: {missing_phases}")
 
-        # Now check which patients have clinical data available
         for patient_dir in patient_dirs:
             patient_id = os.path.basename(os.path.dirname(patient_dir))
 
-            # Check if this patient ID exists in our clinical data
             if patient_id in self.patient_to_clinical_data:
                 valid_patient_dirs.append(patient_dir)
             else:
@@ -464,10 +498,8 @@ class MultiModalBreastMRIDataset(Dataset):
 
     def _initialize_patient_data(self, patient_indices: list[int] | None) -> None:
         """Initialize patient directories and validate data."""
-        # Find and validate directories
         all_mri_dirs = self._get_valid_mri_dirs(patient_indices)
 
-        # Get patient directories with sufficient dynamic sequences and clinical data
         self.patient_dirs = self._get_valid_patient_dirs(all_mri_dirs)
 
         if not self.patient_dirs:
@@ -475,7 +507,6 @@ class MultiModalBreastMRIDataset(Dataset):
 
         logger.info(f"Found {len(self.patient_dirs)} valid patient directories")
 
-        # Initialize patient data
         self.patient_data = self._initialize_dynamic_sequences()
 
     def _initialize_dynamic_sequences(self) -> list[dict[str, str]]:
@@ -569,6 +600,7 @@ class MultiModalBreastMRIDataset(Dataset):
             {
                 "clinical_features": np.zeros(len(self.feature_names), dtype=np.float32),
                 "clinical_label": -1,  # Use -1 as missing label indicator
+                "is_training": False if self.training_patient_ids else None,
             },
         )
 
@@ -578,6 +610,7 @@ class MultiModalBreastMRIDataset(Dataset):
             "patient_id": patient_id,
             "clinical_features": clinical_data["clinical_features"],
             "clinical_label": clinical_data["clinical_label"],
+            "is_training": clinical_data["is_training"],
         }
 
         # Apply transformations
@@ -597,3 +630,60 @@ class MultiModalBreastMRIDataset(Dataset):
     def get_clinical_feature_names(self) -> list[str]:
         """Get the list of clinical feature names."""
         return self.feature_names
+
+    def filter_by_patient_ids(self, patient_ids: list[str]) -> None:
+        """
+        Filter the dataset to include only the specified patient IDs.
+
+        Args:
+            patient_ids: List of patient IDs to include
+        """
+        # Convert to set for faster lookup
+        patient_id_set = set(patient_ids)
+
+        filtered_data = []
+        for phase_dirs in self.patient_data:
+            # Get patient ID from directory structure
+            patient_dir = os.path.dirname(next(iter(phase_dirs.values())))
+            patient_id = os.path.basename(os.path.dirname(patient_dir))
+
+            if patient_id in patient_id_set:
+                filtered_data.append(phase_dirs)
+
+        logger.info(f"Filtered dataset from {len(self.patient_data)} to {len(filtered_data)} patients")
+        self.patient_data = filtered_data
+
+    def get_preprocessor_status(self) -> dict:
+        """
+        Get information about the preprocessors used in this dataset.
+
+        Returns:
+            Dictionary with preprocessor information
+        """
+        info = {
+            "feature_count": len(self.feature_names),
+            "numerical_columns": self.numerical_cols,
+            "categorical_columns": self.categorical_cols,
+            "has_imputers": hasattr(self, "num_imputer") and hasattr(self, "cat_imputer"),
+            "has_scaler": hasattr(self, "scaler"),
+            "training_mode": self.training_patient_ids is not None,
+        }
+
+        if hasattr(self, "num_imputer") and self.numerical_cols:
+            info["numerical_imputer_statistics"] = {
+                "strategy": self.num_imputer.strategy,
+                "sample_means": dict(
+                    zip(
+                        self.numerical_cols[:3],
+                        self.num_imputer.statistics_[:3] if len(self.num_imputer.statistics_) > 3 else self.num_imputer.statistics_,
+                    )
+                ),
+            }
+
+        if hasattr(self, "scaler") and self.numerical_cols:
+            info["scaler_statistics"] = {
+                "sample_means": dict(zip(self.numerical_cols[:3], self.scaler.mean_[:3] if len(self.scaler.mean_) > 3 else self.scaler.mean_)),
+                "sample_scales": dict(zip(self.numerical_cols[:3], self.scaler.scale_[:3] if len(self.scaler.scale_) > 3 else self.scaler.scale_)),
+            }
+
+        return info

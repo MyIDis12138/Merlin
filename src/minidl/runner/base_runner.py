@@ -100,13 +100,14 @@ class BaseRunner(ABC):
     def build_dataset(self) -> None:
         """Build datasets for training, validation, and testing."""
         dataset_config = self.config.get("dataset", {})
+        train_indices = dataset_config.get("indices", {}).get("train", [])
 
         if "train" in dataset_config.get("indices", {}):
-            self.train_dataset = DatasetBuilder.build_dataset(self.config, "train")
+            self.train_dataset = DatasetBuilder.build_dataset(self.config, "train", train_indices)
         if "val" in dataset_config.get("indices", {}):
-            self.val_dataset = DatasetBuilder.build_dataset(self.config, "val")
+            self.val_dataset = DatasetBuilder.build_dataset(self.config, "val", train_indices)
         if "test" in dataset_config.get("indices", {}):
-            self.test_dataset = DatasetBuilder.build_dataset(self.config, "test")
+            self.test_dataset = DatasetBuilder.build_dataset(self.config, "test", train_indices)
 
     def build_dataloader(self) -> None:
         """Build dataloaders for training, validation, and testing."""

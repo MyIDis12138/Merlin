@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "minidl"
-version = "1.0.0"
+version = "1.1.0"
 description = "A minimal deep learning library"
 authors = [
     { name = "Yang Gu", email = "ygu367@gatech.edu" }

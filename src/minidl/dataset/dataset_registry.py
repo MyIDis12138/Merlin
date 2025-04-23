@@ -69,7 +69,7 @@ class DatasetBuilder:
     """
 
     @staticmethod
-    def build_dataset(config: dict[str, Any], split: Literal["train", "val", "test"]) -> Dataset:
+    def build_dataset(config: dict[str, Any], split: Literal["train", "val", "test"], train_indices) -> Dataset:
         """Build a dataset instance based on configuration.
 
         Args:
@@ -95,6 +95,7 @@ class DatasetBuilder:
         dataset_args = {}
         dataset_params = dataset_config.get("params", {})
         dataset_args.update(dataset_params)
+        dataset_args["training_patient_ids"] = train_indices
 
         indices = dataset_config.get("indices", {}).get(split)
         if indices is None:

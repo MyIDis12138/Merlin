@@ -69,18 +69,16 @@ class MultiModal_ResNet3D(nn.Module):
         self.shared_extractor = self.backbone
 
         self.feature_adapter = nn.Sequential(
-            nn.Conv3d(feature_dim, d_model, kernel_size=1, bias=False), 
-            nn.BatchNorm3d(d_model), 
-            nn.ReLU(inplace=True)
+            nn.Conv3d(feature_dim, d_model, kernel_size=1, bias=False), nn.BatchNorm3d(d_model), nn.ReLU(inplace=True)
         )
 
         self.mri_adapters = nn.ModuleList(
             [
                 nn.Sequential(
-                    nn.Conv3d(d_model, d_model, kernel_size=3, padding='same'),
+                    nn.Conv3d(d_model, d_model, kernel_size=3, padding="same"),
                     nn.BatchNorm3d(d_model),
                     nn.ReLU(inplace=True),
-                    nn.Conv3d(d_model, d_model, kernel_size=3, padding='same'),
+                    nn.Conv3d(d_model, d_model, kernel_size=3, padding="same"),
                     nn.BatchNorm3d(d_model),
                 )
                 for _ in range(3)
@@ -88,11 +86,7 @@ class MultiModal_ResNet3D(nn.Module):
         )
 
         self.spatial_attention = nn.Sequential(
-            nn.AdaptiveAvgPool3d(1), 
-            nn.Conv3d(d_model * 3, d_model, 1), 
-            nn.ReLU(), 
-            nn.Conv3d(d_model, d_model * 3, 1), 
-            nn.Sigmoid()
+            nn.AdaptiveAvgPool3d(1), nn.Conv3d(d_model * 3, d_model, 1), nn.ReLU(), nn.Conv3d(d_model, d_model * 3, 1), nn.Sigmoid()
         )
 
         self.position_embeddings = FactorizedPositionalEmbedding3D(self.d_model, 3, 5, 5)
@@ -129,7 +123,7 @@ class MultiModal_ResNet3D(nn.Module):
             nn.Dropout(clinical_dropout),
             nn.Linear(d_model * 8, d_model * 3),
             nn.GELU(),
-            nn.BatchNorm1d(d_model * 3)
+            nn.BatchNorm1d(d_model * 3),
         )
 
         self._initialize_weights()

@@ -26,8 +26,5 @@ uv pip install -e .[dev]
 ### Experiment script
 ```
 source .venv/bin/activate
-# Single experiment
 python src/run.py configs/config.yaml
-# Cross validataion
-python src/run_crossval.py configs/config.yaml
 ```

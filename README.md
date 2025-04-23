@@ -24,11 +24,10 @@ uv pip install -e .[dev]
 
 
 ### Experiment script
-
 ```
 source .venv/bin/activate
+# Single experiment
 python src/run.py configs/config.yaml
+# Cross validataion
+python src/run_crossval.py configs/config.yaml
 ```
-
-### Training tips
-- Currently only have serial data processing and training for GPU support. To enbale GPU for data processing, set global_num_workers=0 and pin_memory: false.

@@ -1,18 +1,18 @@
 ## training pipeline improving
-- [ ] More felxible way for train, val and test indicies (current may too long)
-- [ ] Cross validation runner that auto create folds by combining train and val
-- [ ] More felxible way for clinical feature columns indexing (some columns may too long)
+- [x] More felxible way for train, val and test indicies (current may too long)
+- [x] Cross validation runner that auto create folds by combining train and val
+- [x] More felxible way for clinical feature columns indexing (some columns may too long)
 - [x] Load checkpoints before training
 
 ## model design improving
 - [ ] Expriments for training on [2D MRI](https://europepmc.org/article/MED/37370560)
 - [ ] Expriments for [tabular to image](https://github.com/zhuyitan/IGTD?tab=readme-ov-file)
-- [ ] Feature selecting for clinical features
-- [ ] Baseline cross validation with clinical data and MRI with Cross attention
+- [x] Feature selecting for clinical features
+- [x] Baseline cross validation with clinical data and MRI with Cross attention
 - [x] Apply pre-trained model from [Med3D models](https://github.com/Tencent/MedicalNet)
 
 ## dataset & dataloading problem
-- [ ] Missing clinical data imputing in dataloading pipeline (simple way)
+- [x] Missing clinical data imputing in dataloading pipeline (simple way)
 - [ ] Enlarge the dataset with more data source
 - [x] Enable async GPU data processing and training
 - [x] clinical data only experiments

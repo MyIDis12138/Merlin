@@ -8,7 +8,7 @@ dataset:
     clinical_data_path: "data/Clinical_and_Other_Features.xlsx"
     clinical_label: ['Recurrence', 'Recurrence event(s)', '{0 = no, 1 = yes}']
     clinical_features_filter_dict:
-      0: [ "Follow Up", "US features",] #"Tumor Characteristics"
+      0: [ "Follow Up", "US features"] #"Tumor Characteristics"
     clinical_features_exclude_columns:
       - ['Recurrence', 'Days to local recurrence (from the date of diagnosis)', '']
       - ['Recurrence', 'Days to distant recurrence(from the date of diagnosis)', '']

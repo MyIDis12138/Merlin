@@ -24,11 +24,8 @@ uv pip install -e .[dev]
 
 
 ### Experiment script
-
+To reproduce our results:
 ```
 source .venv/bin/activate
-python src/run.py configs/config.yaml
+python src/run.py configs/multimodal_baseline/config.yaml
 ```
-
-### Training tips
-- Currently only have serial data processing and training for GPU support. To enbale GPU for data processing, set global_num_workers=0 and pin_memory: false.

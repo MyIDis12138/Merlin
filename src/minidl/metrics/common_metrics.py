@@ -53,7 +53,7 @@ def compute_f1_score(outputs: torch.Tensor, targets: torch.Tensor, average: str 
     unique_preds = np.unique(preds)
 
     if len(unique_targets) < 2 and len(unique_preds) < 2:
-        logger.warning("F1 score is not well-defined for single-class data/predictions. Falling back to accuracy.")
+        # logger.warning("F1 score is not well-defined for single-class data/predictions. Falling back to accuracy.")
         return float(accuracy_score(targets_np, preds))
 
     try:

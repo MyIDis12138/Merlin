@@ -296,7 +296,7 @@ class MultiModal_ResNet3D_V2(nn.Module):
             nn.GELU(),
         )
 
-        self.attn_norm = nn.LayerNorm(75, d_model * 3)
+        self.attn_norm = nn.LayerNorm((75, d_model * 3))
         self.layer_norm = nn.LayerNorm(d_model * 6)
 
         self.classifier = nn.Sequential(
@@ -391,7 +391,7 @@ class MultiModal_ResNet3D_V2(nn.Module):
         clinical_v = clinical_feat.unsqueeze(1)  # (B, 1, C_cat)
         attn_output, _ = self.attention(V_pos, clinical_k, clinical_v)  # [B, D * H * W, 3 * d_model]
 
-        attn_output = self.attn_norm(V_pos, attn_output)
+        attn_output = self.attn_norm(V_pos + attn_output)
 
         attn_output = attn_output.transpose(1, 2).view(B, C, D, H, W)
         x_avg = F.adaptive_avg_pool3d(attn_output, 1).squeeze(-1).squeeze(-1).squeeze(-1)  # [B, 3 * d_model]

@@ -43,7 +43,6 @@ dataset:
       - name: "Resize"
         params:
           target_size: *target_size
-      - name: "Normalize"
 
     test:  # Transforms for test set
       - name: "ToTensor"
@@ -51,7 +50,6 @@ dataset:
       - name: "Resize"
         params:
           target_size: *target_size
-      - name: "Normalize"
 
 dataloader:
   train:

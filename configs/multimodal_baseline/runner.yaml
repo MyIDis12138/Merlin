@@ -28,6 +28,20 @@ runner:
 
       - name: "Normalize"
 
+    val:
+      - name: "ToTensor"
+        params:
+          device: "cuda"
+          
+      - name: "Normalize"
+
+    test:
+      - name: "ToTensor"
+        params:
+          device: "cuda"
+
+      - name: "Normalize"
+
   hooks:
     - name: "checkpoint_loader_hook"
       params:

@@ -213,8 +213,8 @@ class MultiModal_ResNet3D(nn.Module):
         return logits
 
 
-@ModelRegistry.register("multimodal_resnet3d_1phase")
-class MultiModal_ResNet3D_1Phase(nn.Module):
+@ModelRegistry.register("multimodal_resnet3d_nphase")
+class MultiModal_ResNet3D_NPhase(nn.Module):
     """
     ResNet3D-based model for MRI analysis and clinical features using pre-trained weights.
     This model serves as a drop-in replacement for the existing MRI_baseline model,
@@ -303,7 +303,7 @@ class MultiModal_ResNet3D_1Phase(nn.Module):
             nn.GELU(),
         )
 
-        self.attn_norm = nn.LayerNorm((25 * n_phases, d_model * n_phases))
+        self.attn_norm = nn.LayerNorm((75, d_model * n_phases))
         self.layer_norm = nn.LayerNorm(d_model * 2 * n_phases)
 
         self.classifier = nn.Sequential(
@@ -366,15 +366,17 @@ class MultiModal_ResNet3D_1Phase(nn.Module):
         Forward pass through the model.
 
         Args:
-            x: Input tensor of shape [B, 3, D, H, W] containing 3 MRI sequences
+            x: Input tensor of shape [B, n, D, H, W] containing n MRI sequences
 
         Returns:
             Output tensor of shape [B, n_classes]
         """
-        # x: tensor of 3 MRI images, shaped [B, 3, D, H, W]
+        # x: tensor of 3 MRI images, shaped [B, n, D, H, W]
         clinical_feat = self.clinlical_mlp(x["clinical_features"])
 
         x = x["images"]
+        if self.n_phases == 1:
+            x = x.unsqueeze(1)
         features = []
 
         for i in range(self.n_phases):
@@ -384,29 +386,29 @@ class MultiModal_ResNet3D_1Phase(nn.Module):
 
             feat = self.mri_adapters[i](feat)  # [B, d_model, D, H, W]
             features.append(feat)
+        
+        V = torch.cat(features, dim=1)  # [B, n * d_model, D, H, W]
+        B, C, D, H, W = V.shape  # C = n * d_model
 
-        V = torch.cat(features, dim=1)  # [B, 3 * d_model, D, H, W]
-        B, C, D, H, W = V.shape  # C = 3 * d_model
+        attn = self.spatial_attention(V)  # [B, n * d_model, 1, 1, 1]
+        V = V * attn  # [B,  n * d_model, D, H, W]
 
-        attn = self.spatial_attention(V)  # [B, 3 * d_model, 1, 1, 1]
-        V = V * attn  # [B,  3 * d_model, D, H, W]
-
-        V = V.view(B, 3 * self.d_model, -1).transpose(1, 2)
+        V = V.view(B, self.n_phases * self.d_model, -1).transpose(1, 2)
 
         V_pos = self.position_embeddings.add_to_input(V, D, H, W)
 
         clinical_k = clinical_feat.unsqueeze(1)  # (B, 1, C_cat)
         clinical_v = clinical_feat.unsqueeze(1)  # (B, 1, C_cat)
-        attn_output, _ = self.attention(V_pos, clinical_k, clinical_v)  # [B, D * H * W, 3 * d_model]
+        attn_output, _ = self.attention(V_pos, clinical_k, clinical_v)  # [B, D * H * W, n * d_model]
 
         attn_output = self.attn_norm(V_pos + attn_output)
 
         attn_output = attn_output.transpose(1, 2).view(B, C, D, H, W)
-        x_avg = F.adaptive_avg_pool3d(attn_output, 1).squeeze(-1).squeeze(-1).squeeze(-1)  # [B, 3 * d_model]
-        x_max = F.adaptive_max_pool3d(attn_output, 1).squeeze(-1).squeeze(-1).squeeze(-1)  # [B, 3 * d_model]
+        x_avg = F.adaptive_avg_pool3d(attn_output, 1).squeeze(-1).squeeze(-1).squeeze(-1)  # [B, n * d_model]
+        x_max = F.adaptive_max_pool3d(attn_output, 1).squeeze(-1).squeeze(-1).squeeze(-1)  # [B, n * d_model]
 
         x_prev = torch.cat([x_avg, x_max], dim=1)
-        x = self.feed_forward(x_prev)  # [B, 6 * d_model]
+        x = self.feed_forward(x_prev)  # [B, 2 * n * d_model]
 
         x = self.layer_norm(x + x_prev)
 

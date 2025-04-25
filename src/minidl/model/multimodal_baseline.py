@@ -235,6 +235,7 @@ class MultiModal_ResNet3D_1Phase(nn.Module):
         clinical_dropout: float = 0.1,
         n_classes: int = 2,
         d_model: int = 256,
+        n_phases: int = 3,
         out_dropout: float = 0.3,
         backbone: str = "resnet18",
         pretrained: bool | str = False,
@@ -244,6 +245,7 @@ class MultiModal_ResNet3D_1Phase(nn.Module):
 
         self.d_model = d_model
         self.backbone = backbone
+        self.n_phases = n_phases
 
         # Determine the feature dimension based on backbone type
         if backbone in ["resnet18", "resnet34"]:
@@ -281,47 +283,47 @@ class MultiModal_ResNet3D_1Phase(nn.Module):
                     nn.Conv3d(d_model, d_model, kernel_size=3, padding="same"),
                     nn.BatchNorm3d(d_model),
                 )
-                for _ in range(1)
+                for _ in range(n_phases)
             ]
         )
 
         self.spatial_attention = nn.Sequential(
-            nn.AdaptiveAvgPool3d(1), nn.Conv3d(d_model, d_model // 4, 1), nn.ReLU(), nn.Conv3d(d_model // 4, d_model, 1), nn.Sigmoid()
+            nn.AdaptiveAvgPool3d(1), nn.Conv3d(d_model * n_phases, d_model, 1), nn.ReLU(), nn.Conv3d(d_model, d_model * n_phases, 1), nn.Sigmoid()
         )
 
-        self.position_embeddings = FactorizedPositionalEmbedding3D(self.d_model, 3, 5, 5)
-        self.attention = MultiHeadAttention(d_model, 8)
+        self.position_embeddings = FactorizedPositionalEmbedding3D(self.d_model * n_phases, 3, 5, 5)
+        self.attention = MultiHeadAttention(d_model * n_phases, 8)
 
         self.feed_forward = nn.Sequential(
-            nn.Linear(d_model * 2, d_model * 8),
+            nn.Linear(d_model * 2 * n_phases, d_model * 8 * n_phases),
             nn.GELU(),
-            nn.Linear(d_model * 8, d_model * 8),
+            nn.Linear(d_model * 8 * n_phases, d_model * 8 * n_phases),
             nn.GELU(),
-            nn.Linear(d_model * 8, d_model * 2),
+            nn.Linear(d_model * 8 * n_phases, d_model * 2 * n_phases),
             nn.GELU(),
         )
 
-        self.attn_norm = nn.LayerNorm((25, d_model))
-        self.layer_norm = nn.LayerNorm(d_model * 2)
+        self.attn_norm = nn.LayerNorm((25 * n_phases, d_model * n_phases))
+        self.layer_norm = nn.LayerNorm(d_model * 2 * n_phases)
 
         self.classifier = nn.Sequential(
-            nn.Linear(d_model * 2, d_model * 8),
+            nn.Linear(d_model * 2 * n_phases, d_model * 8 * n_phases),
             nn.GELU(),
             nn.Dropout(out_dropout),
-            nn.Linear(d_model * 8, d_model * 8),
+            nn.Linear(d_model * 8 * n_phases, d_model * 8 * n_phases),
             nn.GELU(),
             nn.Dropout(out_dropout),
-            nn.Linear(d_model * 8, n_classes),
+            nn.Linear(d_model * 8 * n_phases, n_classes),
         )
 
         self.clinlical_mlp = nn.Sequential(
-            nn.Linear(d_clinical, d_model * 4),
+            nn.Linear(d_clinical, d_model * 8),
             nn.GELU(),
             nn.Dropout(clinical_dropout),
-            nn.Linear(d_model * 4, d_model * 4),
+            nn.Linear(d_model * 8, d_model * 8),
             nn.GELU(),
             nn.Dropout(clinical_dropout),
-            nn.Linear(d_model * 4, d_model),
+            nn.Linear(d_model * 8, d_model),
             nn.GELU(),
             nn.BatchNorm1d(d_model),
         )
@@ -375,7 +377,7 @@ class MultiModal_ResNet3D_1Phase(nn.Module):
         x = x["images"]
         features = []
 
-        for i in range(3):
+        for i in range(self.n_phases):
             mri = x[:, i : i + 1]  # [B, 1, D, H, W]
 
             feat = self.forward_features(mri)  # [B, 255, 3, 5, 5] for half size

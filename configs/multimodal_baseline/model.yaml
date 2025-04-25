@@ -1,8 +1,9 @@
 model:
-  name: multimodal_resnet3d
+  name: multimodal_resnet3d_1phase
   params:
     n_classes: 2
     d_model: 256
+    n_phases: 1
     out_dropout: 0.3
     backbone: resnet18
     pretrained: true

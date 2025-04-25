@@ -52,7 +52,7 @@ class BreastMRIDataset(Dataset):
             - 1: 'ER/PR pos, HER2 pos'
             - 2: 'her2'
             - 3: 'trip neg'
-        
+
         Recurrence Mapping:
             - 0: no
             - 1: yes
@@ -89,6 +89,7 @@ class BreastMRIDataset(Dataset):
         self,
         root_dir: str,
         clinical_label: list[str, str, str],
+        required_phases: list[str] = None,
         clinical_data_path: str | None = None,
         clinical_features_columns: list[tuple[str, str, str]] | None = None,
         transform: Callable | None = None,
@@ -103,7 +104,7 @@ class BreastMRIDataset(Dataset):
         self.max_workers = max_workers
 
         # Required sequence phases
-        self.required_phases = ["Ph1", "Ph2", "Ph3"]
+        self.required_phases = required_phases if required_phases else ["Ph1", "Ph2", "Ph3"]
 
         # Initialize thread pool
         self.thread_pool = ThreadPoolExecutor(max_workers=self.max_workers)
@@ -263,7 +264,7 @@ class BreastMRIDataset(Dataset):
             # Check if all required phases are available
             if all(phase in phase_to_dir for phase in self.required_phases):
                 patient_id = os.path.basename(os.path.dirname(patient_dir))
-                
+
                 # Skip patients without valid clinical labels if clinical data is available
                 if self.clinical_data is not None:
                     try:
@@ -271,7 +272,7 @@ class BreastMRIDataset(Dataset):
                         if patient_data_row.empty:
                             logger.warning(f"Skipping patient {patient_id}: no matching clinical data found")
                             continue
-                        
+
                         clinical_label_value = patient_data_row[self.clinical_label].values[0]
                         if np.isnan(clinical_label_value):
                             logger.warning(f"Skipping patient {patient_id}: invalid clinical label: {clinical_label_value}")
@@ -279,7 +280,7 @@ class BreastMRIDataset(Dataset):
                     except Exception as e:
                         logger.warning(f"Skipping patient {patient_id}: error checking clinical label: {e}")
                         continue
-                
+
                 patient_data.append(phase_to_dir)
                 logger.debug(f"Successfully loaded patient directory: {os.path.basename(patient_dir)}")
             else:

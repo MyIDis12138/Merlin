@@ -392,10 +392,12 @@ class MultimodalRunner(EpochBasedRunner):
         """
         super().__init__(config, device)
 
-        mm_config = config.get("multimodal", {})
+        mm_config = config.get("dataset", {})
 
-        self.input_keys = mm_config.get("input_keys", ["images", "clinical_features"])
+        self.required_phases = mm_config["params"].get("required_phases", [])
+        self.required_phases_len = len(self.required_phases) if self.required_phases else 3
         self.target_key = mm_config.get("target_key", "clinical_label")
+        self.logger.info(f"Training with phases: {self.required_phases}")
 
         runner_config = config.get("runner", {})
         transforms_config = runner_config.get("transforms", {})
@@ -404,8 +406,6 @@ class MultimodalRunner(EpochBasedRunner):
             if transform_configs:
                 transform = build_transform_pipeline(transform_configs)
                 self.__setattr__(f"{split}_transform", transform)
-
-        self.logger.info(f"Multimodal configuration: input_keys={self.input_keys}, target_key={self.target_key}")
 
     def apply_batch_transform(self, batch_data, transform_pipeline):
         """
@@ -417,7 +417,7 @@ class MultimodalRunner(EpochBasedRunner):
 
             transformed_images = []
             for i in range(batch_size):
-                sample = {"images": [batch_data["images"][i][j] for j in range(3)]}
+                sample = {"images": [batch_data["images"][i][j] for j in range(self.required_phases_len)]}
 
                 transformed = transform_pipeline(sample)
                 transformed_images.append(transformed["images"].squeeze(0))

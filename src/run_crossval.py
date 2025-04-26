@@ -16,21 +16,21 @@ from minidl.utils.seed import set_seed
 # Import necessary functions from run.py
 from run import get_log_level, deep_merge, load_config
 
-# CONFIG_FILES = [
-#     "configs/folds/fold1.yaml",
-#     "configs/folds/fold2.yaml",
-#     "configs/folds/fold3.yaml",
-#     "configs/folds/fold4.yaml",
-#     "configs/folds/fold5.yaml",
-# ]
-
 CONFIG_FILES = [
-    "configs/folds_1phase/fold1_ph3.yaml",
-    "configs/folds_1phase/fold2_ph3.yaml",
-    "configs/folds_1phase/fold3_ph3.yaml",
-    "configs/folds_1phase/fold4_ph3.yaml",
-    "configs/folds_1phase/fold5_ph3.yaml",
+    # "configs/folds/fold1.yaml",
+    # "configs/folds/fold2.yaml",
+    # "configs/folds/fold3.yaml",
+    # "configs/folds/fold4.yaml",
+    "configs/folds/fold5.yaml",
 ]
+
+# CONFIG_FILES = [
+#     "configs/folds_1phase/fold1_ph3.yaml",
+#     "configs/folds_1phase/fold2_ph3.yaml",
+#     "configs/folds_1phase/fold3_ph3.yaml",
+#     "configs/folds_1phase/fold4_ph3.yaml",
+#     "configs/folds_1phase/fold5_ph3.yaml",
+# ]
 
 
 def run_single_fold(config, fold_config_path, args, work_dir_base, experiment_id_base):

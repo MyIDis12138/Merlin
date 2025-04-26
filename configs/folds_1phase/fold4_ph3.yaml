@@ -57,6 +57,7 @@ dataloader:
     shuffle: true
     num_workers: *global_num_workers
     pin_memory: false
+    drop_last: true
 
   val:
     batch_size: *global_batch_size

@@ -295,11 +295,11 @@ class MultiModal_ResNet3D_NPhase(nn.Module):
         self.attention = MultiHeadAttention(d_model * n_phases, 8)
 
         self.feed_forward = nn.Sequential(
-            nn.Linear(d_model * 2 * n_phases, d_model * 8 * n_phases),
+            nn.Linear(d_model * 2 * n_phases, d_model * 4 * n_phases),
             nn.GELU(),
-            nn.Linear(d_model * 8 * n_phases, d_model * 8 * n_phases),
+            nn.Linear(d_model * 4 * n_phases, d_model * 4 * n_phases),
             nn.GELU(),
-            nn.Linear(d_model * 8 * n_phases, d_model * 2 * n_phases),
+            nn.Linear(d_model * 4 * n_phases, d_model * 2 * n_phases),
             nn.GELU(),
         )
 
@@ -307,13 +307,13 @@ class MultiModal_ResNet3D_NPhase(nn.Module):
         self.layer_norm = nn.LayerNorm(d_model * 2 * n_phases)
 
         self.classifier = nn.Sequential(
-            nn.Linear(d_model * 2 * n_phases, d_model * 8 * n_phases),
+            nn.Linear(d_model * 2 * n_phases, d_model * 4 * n_phases),
             nn.GELU(),
             nn.Dropout(out_dropout),
-            nn.Linear(d_model * 8 * n_phases, d_model * 8 * n_phases),
+            nn.Linear(d_model * 4 * n_phases, d_model * 4 * n_phases),
             nn.GELU(),
             nn.Dropout(out_dropout),
-            nn.Linear(d_model * 8 * n_phases, n_classes),
+            nn.Linear(d_model * 4 * n_phases, n_classes),
         )
 
         self.clinlical_mlp = nn.Sequential(
@@ -323,9 +323,9 @@ class MultiModal_ResNet3D_NPhase(nn.Module):
             nn.Linear(d_model * 8, d_model * 8),
             nn.GELU(),
             nn.Dropout(clinical_dropout),
-            nn.Linear(d_model * 8, d_model),
+            nn.Linear(d_model * 8, d_model * n_phases),
             nn.GELU(),
-            nn.BatchNorm1d(d_model),
+            nn.BatchNorm1d(d_model * n_phases),
         )
 
         self._initialize_weights()
@@ -372,6 +372,7 @@ class MultiModal_ResNet3D_NPhase(nn.Module):
             Output tensor of shape [B, n_classes]
         """
         # x: tensor of 3 MRI images, shaped [B, n, D, H, W]
+        # breakpoint()
         clinical_feat = self.clinlical_mlp(x["clinical_features"])
 
         x = x["images"]

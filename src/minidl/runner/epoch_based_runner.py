@@ -216,7 +216,7 @@ class EpochBasedRunner(BaseRunner):
             self.logger.error("Cannot train epoch: train_dataloader is None")
             return {"loss": float("inf")}
 
-        pbar = tqdm(self.train_dataloader, desc=f"Epoch {self.current_epoch}/{self.max_epochs}")
+        pbar = tqdm(self.train_dataloader, desc=f"Epoch {self.current_epoch + 1}/{self.max_epochs}")
         for batch_idx, batch in enumerate(pbar):
             self.call_hooks("before_train_step")
             step_metrics = self.train_step(batch)

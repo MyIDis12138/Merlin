@@ -920,7 +920,7 @@ class MultiModal_ResNet3D_NPhase_Attn_Clinic(nn.Module):
             nn.Dropout(clinical_dropout),
             nn.Linear(d_model * 8, d_model * n_phases),
             nn.GELU(),
-            nn.BatchNorm1d(d_model * n_phases),
+            # nn.BatchNorm1d(d_model * n_phases),
         )
 
         self._initialize_weights()

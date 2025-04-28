@@ -284,3 +284,5 @@ class BaseRunner(ABC):
         # Run testing
         test_metrics = self.test()
         self.logger.info(f"Test metrics: {test_metrics}")
+
+        return {"val": val_metrics, "test": test_metrics}

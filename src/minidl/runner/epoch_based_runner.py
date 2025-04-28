@@ -1,6 +1,7 @@
 import functools
 import time
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any, TypeVar
 
 import torch
@@ -329,6 +330,8 @@ class EpochBasedRunner(BaseRunner):
         start_time = time.time()
 
         self.call_hooks("before_train")
+        self.best_val_metric = float("inf")
+        self.best_model = None
 
         for epoch in range(self.current_epoch, self.max_epochs):
             self.current_epoch = epoch
@@ -338,6 +341,10 @@ class EpochBasedRunner(BaseRunner):
 
             if self.val_dataloader is not None:
                 val_metrics = self.val_epoch()
+                if val_metrics["loss"] < self.best_val_metric:
+                    self.best_val_metric = val_metrics["loss"]
+                    self.logger.info(f"New best validation metric: {self.best_val_metric}")
+                    self.best_model = deepcopy(self.model)
                 self.logger.info(f"Epoch {epoch}/{self.max_epochs}, Val metrics: {val_metrics}")
 
             if self.scheduler is not None:
@@ -358,6 +365,10 @@ class EpochBasedRunner(BaseRunner):
             self.logger.warning("No validation dataloader available")
             return {}
 
+        if self.best_model is not None:
+            self.logger.info("Loading best model state for validation")
+            self.model = deepcopy(self.best_model)
+
         self.logger.info("Starting validation")
         val_metrics = self.val_epoch()
 
@@ -372,6 +383,10 @@ class EpochBasedRunner(BaseRunner):
         if self.test_dataloader is None:
             self.logger.warning("No test dataloader available")
             return {}
+
+        if self.best_model is not None:
+            self.logger.info("Loading best model state for testing")
+            self.model = deepcopy(self.best_model)
 
         self.logger.info("Starting testing")
         test_metrics = self.test_epoch()

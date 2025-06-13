@@ -1,8 +1,8 @@
 imports:
   - logging.yaml
   - model.yaml
-  - training.yaml
-  # - dataset_1phase.yaml
+  # - training.yaml
+  - dataset_1phase.yaml
   - dataset.yaml
   - runner.yaml
 
@@ -11,8 +11,8 @@ environment:
   device: "cuda"
 
 experiment:
-  name: "recurrance_mri_baseline_dmodel_256_lr1e4"
-  work_dir: "work_dirs/experiments/recurrance_mri_baseline_dmodel_256_lr1e4"
+  name: "multimodal_resnet3d_nphase_attn_clinical"
+  work_dir: "work_dirs/experiments/multimodal_resnet3d_nphase_attn_clinical"
   tags:
     - "baseline"
     - "clinical_label"

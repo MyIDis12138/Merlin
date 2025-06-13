@@ -193,7 +193,7 @@ def main():
     parser = argparse.ArgumentParser(description="Train PyTorch models using multiple dataset configurations.")
 
     parser.add_argument("config", type=str, help="Path to the base YAML configuration file.")
-    parser.add_argument("--work_dir", type=str, default=None, help="Base output directory (overrides config). Folds will be in subdirs.")
+    parser.add_argument("--work_dir", type=str, default="work_dirs", help="Base output directory (overrides config). Folds will be in subdirs.")
     parser.add_argument("--experiment_id", type=str, default="BreastMRI", help="Base experiment ID to save the outputs")
     parser.add_argument(
         "--log_level",

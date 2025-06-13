@@ -28,3 +28,4 @@ training:
   metrics:
     - accuracy
     - f1_score
+    # - auc

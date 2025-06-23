@@ -182,6 +182,10 @@ class EpochBasedRunner(BaseRunner):
             outputs = model(inputs)
             loss = loss_fn(outputs, targets)
 
+            # Update accumulated metrics if available
+            if hasattr(self, 'accumulated_metrics_calculator') and self.accumulated_metrics_calculator is not None:
+                self.accumulated_metrics_calculator.update(outputs, targets)
+
             metrics = {}
             if hasattr(self, "metrics_calculator"):
                 metrics = self.metrics_calculator.compute_metrics(outputs, targets)
@@ -257,6 +261,10 @@ class EpochBasedRunner(BaseRunner):
             self.logger.error("Cannot validate epoch: val_dataloader is None")
             return {"loss": float("inf"), "accuracy": 0.0}
 
+        # Reset accumulated metrics at the start of epoch
+        if hasattr(self, 'accumulated_metrics_calculator') and self.accumulated_metrics_calculator is not None:
+            self.accumulated_metrics_calculator.reset()
+
         pbar = tqdm(self.val_dataloader, desc="Validation")
         for batch_idx, batch in enumerate(pbar):
             self.call_hooks("before_val_step")
@@ -273,6 +281,13 @@ class EpochBasedRunner(BaseRunner):
         dataloader_len = len(self.val_dataloader)
         for k in epoch_metrics:
             epoch_metrics[k] /= float(dataloader_len)
+
+        # Compute accumulated metrics if available
+        if hasattr(self, 'accumulated_metrics_calculator') and self.accumulated_metrics_calculator is not None:
+            accumulated_metrics = self.accumulated_metrics_calculator.compute_metrics()
+            # Add accumulated metrics with 'acc_' prefix to distinguish from averaged metrics
+            for metric_name, metric_value in accumulated_metrics.items():
+                epoch_metrics[f"acc_{metric_name}"] = metric_value
 
         self.val_metrics = epoch_metrics
         self.call_hooks("after_val_epoch")
@@ -296,6 +311,10 @@ class EpochBasedRunner(BaseRunner):
             self.logger.error("Cannot test epoch: test_dataloader is None")
             return {"loss": float("inf"), "accuracy": 0.0}
 
+        # Reset accumulated metrics at the start of epoch
+        if hasattr(self, 'accumulated_metrics_calculator') and self.accumulated_metrics_calculator is not None:
+            self.accumulated_metrics_calculator.reset()
+
         pbar = tqdm(self.test_dataloader, desc="Testing")
         for batch_idx, batch in enumerate(pbar):
             self.call_hooks("before_test_step")
@@ -312,6 +331,13 @@ class EpochBasedRunner(BaseRunner):
         dataloader_len = len(self.test_dataloader)
         for k in epoch_metrics:
             epoch_metrics[k] /= float(dataloader_len)
+
+        # Compute accumulated metrics if available
+        if hasattr(self, 'accumulated_metrics_calculator') and self.accumulated_metrics_calculator is not None:
+            accumulated_metrics = self.accumulated_metrics_calculator.compute_metrics()
+            # Add accumulated metrics with 'acc_' prefix to distinguish from averaged metrics
+            for metric_name, metric_value in accumulated_metrics.items():
+                epoch_metrics[f"acc_{metric_name}"] = metric_value
 
         self.test_metrics = epoch_metrics
         self.call_hooks("after_test_epoch")

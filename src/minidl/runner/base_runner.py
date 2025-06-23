@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader, Dataset
 from minidl.dataset import DatasetBuilder
 from minidl.losses import build_loss
 from minidl.metrics import MetricsBuilder, MetricsCalculator
+from minidl.metrics.accumulated_metrics import MultiAccumulatedMetricsCalculator
 from minidl.model.model_registry import ModelBuilder
 
 T = TypeVar("T")
@@ -92,6 +93,14 @@ class BaseRunner(ABC):
         metrics_config = self.config.get("training", {})
         metrics_dict = MetricsBuilder.build_metrics(metrics_config.get("metrics", []))
         self.metrics_calculator = MetricsCalculator(metrics_dict)
+        
+        # Build accumulated metrics if configured
+        accumulated_metrics_config = metrics_config.get("accumulated_metrics", {})
+        if accumulated_metrics_config.get("enabled", False):
+            metrics_to_accumulate = accumulated_metrics_config.get("metrics", {})
+            self.accumulated_metrics_calculator = MultiAccumulatedMetricsCalculator(metrics_to_accumulate)
+        else:
+            self.accumulated_metrics_calculator = None
 
     def build_loss(self) -> None:
         """Build loss function from config."""

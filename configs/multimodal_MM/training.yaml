@@ -28,7 +28,7 @@ training:
   metrics:
     - accuracy
     - f1_score
-  
+
   accumulated_metrics:
     - precision
     - recall

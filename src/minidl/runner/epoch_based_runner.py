@@ -183,7 +183,7 @@ class EpochBasedRunner(BaseRunner):
             loss = loss_fn(outputs, targets)
 
             # Update accumulated metrics if available
-            if hasattr(self, 'accumulated_metrics_calculator') and self.accumulated_metrics_calculator is not None:
+            if hasattr(self, "accumulated_metrics_calculator") and self.accumulated_metrics_calculator is not None:
                 self.accumulated_metrics_calculator.update(outputs, targets)
 
             metrics = {}
@@ -262,7 +262,7 @@ class EpochBasedRunner(BaseRunner):
             return {"loss": float("inf"), "accuracy": 0.0}
 
         # Reset accumulated metrics at the start of epoch
-        if hasattr(self, 'accumulated_metrics_calculator') and self.accumulated_metrics_calculator is not None:
+        if hasattr(self, "accumulated_metrics_calculator") and self.accumulated_metrics_calculator is not None:
             self.accumulated_metrics_calculator.reset()
 
         pbar = tqdm(self.val_dataloader, desc="Validation")
@@ -283,7 +283,7 @@ class EpochBasedRunner(BaseRunner):
             epoch_metrics[k] /= float(dataloader_len)
 
         # Compute accumulated metrics if available
-        if hasattr(self, 'accumulated_metrics_calculator') and self.accumulated_metrics_calculator is not None:
+        if hasattr(self, "accumulated_metrics_calculator") and self.accumulated_metrics_calculator is not None:
             accumulated_metrics = self.accumulated_metrics_calculator.compute_metrics()
             # Add accumulated metrics with 'acc_' prefix to distinguish from averaged metrics
             for metric_name, metric_value in accumulated_metrics.items():
@@ -312,7 +312,7 @@ class EpochBasedRunner(BaseRunner):
             return {"loss": float("inf"), "accuracy": 0.0}
 
         # Reset accumulated metrics at the start of epoch
-        if hasattr(self, 'accumulated_metrics_calculator') and self.accumulated_metrics_calculator is not None:
+        if hasattr(self, "accumulated_metrics_calculator") and self.accumulated_metrics_calculator is not None:
             self.accumulated_metrics_calculator.reset()
 
         pbar = tqdm(self.test_dataloader, desc="Testing")
@@ -333,7 +333,7 @@ class EpochBasedRunner(BaseRunner):
             epoch_metrics[k] /= float(dataloader_len)
 
         # Compute accumulated metrics if available
-        if hasattr(self, 'accumulated_metrics_calculator') and self.accumulated_metrics_calculator is not None:
+        if hasattr(self, "accumulated_metrics_calculator") and self.accumulated_metrics_calculator is not None:
             accumulated_metrics = self.accumulated_metrics_calculator.compute_metrics()
             # Add accumulated metrics with 'acc_' prefix to distinguish from averaged metrics
             for metric_name, metric_value in accumulated_metrics.items():

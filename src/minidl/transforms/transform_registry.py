@@ -93,7 +93,7 @@ class TransformBuilder:
             raise ValueError("Transform type must be specified in config (type)")
 
         transform_cls = TransformRegistry.get(transform_type)
-        return transform_cls(**config.get('params', {}))
+        return transform_cls(**config.get("params", {}))
 
     @classmethod
     def register_transform(cls, name: str, transform_cls: type[BaseTransform]) -> None:

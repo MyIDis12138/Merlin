@@ -35,4 +35,4 @@ def build_loss(config: dict[str, Any]) -> nn.Module:
             raise ValueError(f"Loss type {loss_type} not found in registry or torch.nn")
 
     # Instantiate the loss function
-    return loss_class(**loss_config.get('params', {}))
+    return loss_class(**loss_config.get("params", {}))

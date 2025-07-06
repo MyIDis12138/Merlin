@@ -32,7 +32,7 @@ runner:
       - name: "ToTensor"
         params:
           device: "cuda"
-          
+
       - name: "Normalize"
 
     test:

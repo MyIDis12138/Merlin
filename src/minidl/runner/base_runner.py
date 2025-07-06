@@ -93,7 +93,7 @@ class BaseRunner(ABC):
         metrics_config = self.config.get("training", {})
         metrics_dict = MetricsBuilder.build_metrics(metrics_config.get("metrics", []))
         self.metrics_calculator = MetricsCalculator(metrics_dict)
-        
+
         # Build accumulated metrics if configured
         accumulated_metrics_config = metrics_config.get("accumulated_metrics", {})
         if accumulated_metrics_config.get("enabled", False):
@@ -273,7 +273,7 @@ class BaseRunner(ABC):
         """
         pass
 
-    def run(self) -> None:
+    def run(self) -> dict[str, dict[str, float]]:
         """Run the training, validation, and testing process."""
         # Build components
         self.build_model()

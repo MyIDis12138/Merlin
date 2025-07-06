@@ -89,4 +89,4 @@ class ModelBuilder:
 
         model_cls = ModelRegistry.get(model_name)
 
-        return model_cls(**model_config.get('params', {}))
+        return model_cls(**model_config.get("params", {}))

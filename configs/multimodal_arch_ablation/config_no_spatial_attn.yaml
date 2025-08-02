@@ -1,0 +1,19 @@
+imports:
+  - logging.yaml
+  - no_spatial_attn.yaml
+  - training.yaml
+  # - dataset_1phase.yaml
+  - dataset.yaml
+  - runner.yaml
+
+environment:
+  seed: 42
+  device: "cuda"
+
+experiment:
+  name: "multimodal_resnet3d_nphase_attn_clinical"
+  work_dir: "work_dirs/experiments/multimodal_resnet3d_nphase_attn_clinical"
+  tags:
+    - "baseline"
+    - "clinical_label"
+  description: "Baseline model for breast MRI molecular subtype classification"

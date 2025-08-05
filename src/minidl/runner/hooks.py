@@ -4,9 +4,8 @@ from collections.abc import Callable
 from typing import Any
 
 import torch
-from torch.utils.tensorboard.writer import SummaryWriter
-
 import wandb
+from torch.utils.tensorboard.writer import SummaryWriter
 
 
 class HookRegistry:

@@ -5,8 +5,8 @@ import logging.config
 import os
 import pprint
 import sys
-from datetime import datetime
 from collections import defaultdict
+from datetime import datetime
 
 import torch
 import yaml
@@ -23,6 +23,7 @@ CONFIG_FILES = [
     "configs/folds/fold5.yaml",
 ]
 
+
 def run_single_fold(config, fold_config_path, args, work_dir_base, experiment_id_base):
     """
     Run a single experiment fold. Modified to return success status and metrics.
@@ -37,7 +38,6 @@ def run_single_fold(config, fold_config_path, args, work_dir_base, experiment_id
     try:
         with open(fold_config_path, "r") as f:
             dataset_config = yaml.load(f, Loader=yaml.SafeLoader) or {}
-            breakpoint()
             fold_config = deep_merge(fold_config, dataset_config)
     except FileNotFoundError:
         if master_logger.hasHandlers():
@@ -273,10 +273,7 @@ def main():
                     f.write("  Metrics: None reported.\n")
 
             # --- Calculate and log average metrics ---
-            successful_folds_metrics = [
-                result["metrics"] for result in results_with_metrics.values()
-                if result["success"] and result["metrics"]
-            ]
+            successful_folds_metrics = [result["metrics"] for result in results_with_metrics.values() if result["success"] and result["metrics"]]
 
             if successful_folds_metrics:
                 # Use defaultdict to easily sum metrics
@@ -286,15 +283,15 @@ def main():
 
                 # Sum metrics across all successful folds
                 for metrics in successful_folds_metrics:
-                    for data_split, split_metrics in metrics.items(): # 'test', 'val'
-                        for metric_name, value in split_metrics.items(): # 'accuracy', 'f1_score', 'loss'
+                    for data_split, split_metrics in metrics.items():  # 'test', 'val'
+                        for metric_name, value in split_metrics.items():  # 'accuracy', 'f1_score', 'loss'
                             avg_metrics[data_split][metric_name] += value
                             metric_counts[data_split][metric_name] += 1
 
                 # Divide by the count to get the average
                 for data_split, split_metrics in avg_metrics.items():
                     for metric_name in split_metrics:
-                         avg_metrics[data_split][metric_name] /= metric_counts[data_split][metric_name]
+                        avg_metrics[data_split][metric_name] /= metric_counts[data_split][metric_name]
 
                 f.write("--- Averages ---\n")
                 f.write(f"Averaged over {num_successful_folds} successful folds:\n")

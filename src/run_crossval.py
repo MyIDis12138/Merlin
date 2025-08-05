@@ -6,6 +6,7 @@ import os
 import pprint
 import sys
 from datetime import datetime
+from collections import defaultdict
 
 import torch
 import yaml
@@ -14,30 +15,13 @@ from minidl.runner import RunnerBuilder
 from minidl.utils.seed import set_seed
 from run import deep_merge, get_log_level, load_config
 
-# CONFIG_FILES = [
-#     "configs/folds/fold1.yaml",
-#     "configs/folds/fold2.yaml",
-#     "configs/folds/fold3.yaml",
-#     "configs/folds/fold4.yaml",
-#     "configs/folds/fold5.yaml",
-# ]
-
 CONFIG_FILES = [
-    "configs/folds_1phase/fold1.yaml",
-    "configs/folds_1phase/fold2.yaml",
-    "configs/folds_1phase/fold3.yaml",
-    "configs/folds_1phase/fold4.yaml",
-    "configs/folds_1phase/fold5.yaml",
+    "configs/folds/fold1.yaml",
+    "configs/folds/fold2.yaml",
+    "configs/folds/fold3.yaml",
+    "configs/folds/fold4.yaml",
+    "configs/folds/fold5.yaml",
 ]
-
-# CONFIG_FILES = [
-#     "configs/folds_2phase/fold1.yaml",
-#     "configs/folds_2phase/fold2.yaml",
-#     "configs/folds_2phase/fold3.yaml",
-#     "configs/folds_2phase/fold4.yaml",
-#     "configs/folds_2phase/fold5.yaml",
-# ]
-
 
 def run_single_fold(config, fold_config_path, args, work_dir_base, experiment_id_base):
     """
@@ -53,6 +37,7 @@ def run_single_fold(config, fold_config_path, args, work_dir_base, experiment_id
     try:
         with open(fold_config_path, "r") as f:
             dataset_config = yaml.load(f, Loader=yaml.SafeLoader) or {}
+            breakpoint()
             fold_config = deep_merge(fold_config, dataset_config)
     except FileNotFoundError:
         if master_logger.hasHandlers():
@@ -275,17 +260,49 @@ def main():
             f.write(f"Sequential Mode: {args.sequential}\n")
             f.write(f"Processed Folds: {num_processed}/{len(CONFIG_FILES)}\n")
             f.write("--- Results ---\n")
+            # --- Log individual fold results ---
             for fold, result in results_with_metrics.items():
                 status_str = "SUCCESS" if result["success"] else "FAILURE"
                 f.write(f"Fold {fold}: {status_str}\n")
                 if result["success"] and result["metrics"]:
                     f.write("  Metrics:\n")
+                    # Use pprint to format the dictionary for readability
                     f.write(pprint.pformat(result["metrics"], indent=4))
                     f.write("\n")
                 elif result["success"]:
                     f.write("  Metrics: None reported.\n")
+
+            # --- Calculate and log average metrics ---
+            successful_folds_metrics = [
+                result["metrics"] for result in results_with_metrics.values()
+                if result["success"] and result["metrics"]
+            ]
+
+            if successful_folds_metrics:
+                # Use defaultdict to easily sum metrics
+                avg_metrics = defaultdict(lambda: defaultdict(float))
+                metric_counts = defaultdict(lambda: defaultdict(int))
+                num_successful_folds = len(successful_folds_metrics)
+
+                # Sum metrics across all successful folds
+                for metrics in successful_folds_metrics:
+                    for data_split, split_metrics in metrics.items(): # 'test', 'val'
+                        for metric_name, value in split_metrics.items(): # 'accuracy', 'f1_score', 'loss'
+                            avg_metrics[data_split][metric_name] += value
+                            metric_counts[data_split][metric_name] += 1
+
+                # Divide by the count to get the average
+                for data_split, split_metrics in avg_metrics.items():
+                    for metric_name in split_metrics:
+                         avg_metrics[data_split][metric_name] /= metric_counts[data_split][metric_name]
+
+                f.write("--- Averages ---\n")
+                f.write(f"Averaged over {num_successful_folds} successful folds:\n")
+                f.write(pprint.pformat(dict(avg_metrics), indent=4))
+                f.write("\n")
+
             f.write("--- Overall ---\n")
-            # Determine overall status string for file
+            # --- Determine overall status string for file ---
             if num_processed == 0:
                 overall_status = "No folds processed."
             elif all_succeeded and num_processed == len(CONFIG_FILES):
@@ -293,7 +310,7 @@ def main():
             elif all_succeeded and num_processed < len(CONFIG_FILES):
                 overall_status = f"Run stopped early, but all {num_processed} processed folds succeeded."
             else:
-                failed_folds = [f for f, r in results_with_metrics.items() if not r["success"]]
+                failed_folds = [f"Fold {f}" for f, r in results_with_metrics.items() if not r["success"]]
                 overall_status = f"One or more folds failed: {', '.join(failed_folds)}"
             f.write(f"{overall_status}\n")
             f.write("=" * 60 + "\n\n")

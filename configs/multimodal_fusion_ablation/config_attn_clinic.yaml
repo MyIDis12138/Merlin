@@ -1,8 +1,7 @@
 imports:
   - logging.yaml
-  - no_spatial_attn.yaml
+  - model_attn_clinic.yaml
   - training.yaml
-  # - dataset_1phase.yaml
   - dataset.yaml
   - runner.yaml
 
@@ -11,8 +10,8 @@ environment:
   device: "cuda"
 
 experiment:
-  name: "multimodal_resnet3d_nphase_no_spatial_attn"
-  work_dir: "work_dirs/experiments/multimodal_resnet3d_nphase_no_spatial_attn"
+  name: "multimodal_resnet3d_nphase_attn_clinic"
+  work_dir: "work_dirs/experiments/multimodal_resnet3d_nphase_attn_clinic"
   tags:
     - "baseline"
     - "clinical_label"

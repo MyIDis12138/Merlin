@@ -10,9 +10,9 @@ environment:
   device: "cuda"
 
 experiment:
-  name: "multimodal_resnet3d_nphase_attn_clinical"
-  work_dir: "work_dirs/experiments/multimodal_resnet3d_nphase_attn_clinical"
+  name: "multimodal_resnet3d_nphase_wo_pos_merlin"
+  work_dir: "work_dirs/experiments/multimodal_resnet3d_nphase_wo_pos_merlin"
   tags:
     - "baseline"
     - "clinical_label"
-  description: "Baseline model for breast MRI molecular subtype classification"
+  description: "Baseline model for breast MRI recurrance prediction"

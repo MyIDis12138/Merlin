@@ -1,8 +1,9 @@
 model:
-  name: mri_resnet3d
+  name: multimodal_resnet3d_nphase_attn_clinical #multimodal_resnet3d, multimodal_resnet3d_nphase
   params:
     n_classes: 2
     d_model: 256
+    n_phases: 3
     out_dropout: 0.3
     backbone: resnet18
     pretrained: true

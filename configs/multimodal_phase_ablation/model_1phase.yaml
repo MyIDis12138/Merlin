@@ -3,6 +3,7 @@ model:
   params:
     n_classes: 2
     d_model: 256
+    d_clinical: 78 #86
     n_phases: 1
     out_dropout: 0.3
     backbone: resnet18

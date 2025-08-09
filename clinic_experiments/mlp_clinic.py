@@ -1040,7 +1040,16 @@ if __name__ == "__main__":
         "N_OPTUNA_TRIALS": 50,
         "RANDOM_STATE": 42,
         "TOP_N": 128,
-        "FILTER_DICT": {0: ["Recurrence", "Follow Up", "US features"]},
+        "FILTER_DICT": {      
+        0:  [
+                "Recurrence",
+                "Follow Up",
+                "US features",
+                "Tumor Response",
+                "Pathologic Response to Neoadjuvant Therapy",
+                "Near Complete Response",
+            ]
+        },
         "EXCLUDE_COLUMNS": [
             ("Tumor Characteristics", "Staging(Tumor Size)# [T]", ""),
             ("Mammography Characteristics", "Tumor Size (cm)", ""),

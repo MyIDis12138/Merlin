@@ -604,7 +604,7 @@ class MultiModal_ResNet3D_NPhase_No_Spatial_Attention(nn.Module):
         clinical_v = clinical_feat.unsqueeze(1)  # (B, 1, C_cat)
         attn_output, _ = self.attention(V_pos, clinical_k, clinical_v)  # [B, D * H * W, n * d_model]
 
-        attn_output = self.attn_norm(V_pos + attn_output)
+        attn_output = self.attn_norm(V + attn_output)
 
         attn_output = attn_output.transpose(1, 2).view(B, C, D, H, W)
         x_avg = F.adaptive_avg_pool3d(attn_output, 1).squeeze(-1).squeeze(-1).squeeze(-1)  # [B, n * d_model]

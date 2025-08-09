@@ -1,6 +1,6 @@
 runner:
   name: "epoch_based_multimodal_runner"
-  max_epochs: 7
+  max_epochs: 10
   transforms:
     train:
       - name: "ToTensor"

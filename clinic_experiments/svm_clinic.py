@@ -538,8 +538,8 @@ if __name__ == "__main__":
         "N_OPTUNA_TRIALS": 50,
         "RANDOM_STATE": 42,
         "TOP_N": 64,
-        "FILTER_DICT": {      
-        0:  [
+        "FILTER_DICT": {
+            0: [
                 "Recurrence",
                 "Follow Up",
                 "US features",

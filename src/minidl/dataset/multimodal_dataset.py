@@ -78,6 +78,7 @@ class MultiModalBreastMRIDataset(Dataset):
         root_dir: str,
         clinical_data_path: str,
         clinical_label: list[str, str, str],
+        required_phases: list[str] = None,
         clinical_features_filter_dict: dict = None,
         clinical_features_exclude_columns: list = None,
         transform: Callable = None,
@@ -95,7 +96,7 @@ class MultiModalBreastMRIDataset(Dataset):
         self.max_workers = max_workers
         self.training_patient_ids = [f"Breast_MRI_{pid:03}" for pid in training_patient_ids]
 
-        self.required_phases = ["Ph1", "Ph2", "Ph3"]
+        self.required_phases = required_phases if required_phases else ["Ph1", "Ph2", "Ph3"]
 
         self.thread_pool = ThreadPoolExecutor(max_workers=self.max_workers)
 

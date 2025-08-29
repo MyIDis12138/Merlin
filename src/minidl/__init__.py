@@ -1,8 +1,3 @@
-from . import dataset
-from . import losses
-from . import model
-from . import runner
-from . import transforms
-from . import metrics
+from . import dataset, losses, metrics, model, runner, transforms
 
 __all__ = ["dataset", "losses", "model", "runner", "transforms", "metrics"]

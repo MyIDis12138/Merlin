@@ -1,8 +1,10 @@
 model:
-  name: multimodal_resnet3d
+  name: multimodal_resnet3d_nphase #multimodal_resnet3d, multimodal_resnet3d_nphase
   params:
     n_classes: 2
     d_model: 256
+    d_clinical: 78 #86
+    n_phases: 2
     out_dropout: 0.3
     backbone: resnet18
     pretrained: true

@@ -2,13 +2,8 @@ from typing import Any
 
 import numpy as np
 import torch
-from monai.transforms import (
-    RandBiasField,
-    RandFlip,
-    RandGaussianNoise,
-    RandGibbsNoise,
-    Resize as MonaiResize,
-)
+from monai.transforms.intensity.array import RandBiasField, RandGaussianNoise, RandGibbsNoise
+from monai.transforms.spatial.array import RandFlip, Resize as MonaiResize
 
 from .transform_registry import BaseTransform, TransformRegistry
 
@@ -134,7 +129,9 @@ class Normalize(BaseTransform):
         else:
             # NumPy array case
             tensor = torch.from_numpy(images).float()
-            images_scaled = self.normalize(tensor).numpy()
+            images_scaled = self.normalize(tensor)
+            if isinstance(images_scaled, torch.Tensor):
+                images_scaled = images_scaled.numpy()
 
         x["images"] = images_scaled
         return x
@@ -228,11 +225,11 @@ class ToTensor(BaseTransform):
               If None, tensor will be loaded to CPU.
     """
 
-    def __init__(self, device: str | None = 'cpu'):
+    def __init__(self, device: str | None = "cpu"):
         if device is not None:
             self.device = torch.device(device)
         else:
-            self.device = torch.device('cpu')
+            self.device = torch.device("cpu")
 
     def __call__(self, x: dict[str, Any]) -> dict[str, Any]:
         images = x["images"]
@@ -247,11 +244,12 @@ class ToTensor(BaseTransform):
         elif isinstance(images, torch.Tensor):
             # Just move existing tensor to device
             x["images"] = images.to(self.device)
-            
+
         return x
 
     def __repr__(self) -> str:
         return f"ToTensor_MONAI(device={self.device})"
+
 
 @TransformRegistry.register("RandomBiasField")
 class RandomBiasField(BaseTransform):
@@ -280,14 +278,21 @@ class RandomBiasField(BaseTransform):
                 if isinstance(img, np.ndarray):
                     tensor = torch.from_numpy(img).float()
                     processed = self.transform(tensor)
-                    processed_list.append(processed.numpy())
+                    if isinstance(processed, torch.Tensor):
+                        processed_list.append(processed.numpy())
+                    else:
+                        processed_list.append(processed)
                 else:
                     processed = self.transform(img)
                     processed_list.append(processed)
             x["images"] = processed_list
         elif isinstance(images, np.ndarray):
             tensor = torch.from_numpy(images).float()
-            x["images"] = self.transform(tensor).numpy()
+            processed = self.transform(tensor)
+            if isinstance(processed, torch.Tensor):
+                x["images"] = processed.numpy()
+            else:
+                x["images"] = processed
         else:
             # Already a tensor
             x["images"] = self.transform(images)
@@ -416,6 +421,11 @@ class RandomMotion(BaseTransform):
         result = tensor
         for _ in range(self.num_transforms):
             result = self.transform(result)
+            if isinstance(result, torch.Tensor):
+                continue
+            else:
+                # Convert back to tensor if needed
+                result = torch.from_numpy(result).float()
         return result
 
     def __repr__(self) -> str:
@@ -455,14 +465,21 @@ class RandomFlip(BaseTransform):
                 if isinstance(img, np.ndarray):
                     tensor = torch.from_numpy(img).float()
                     processed = self.transform(tensor)
-                    processed_list.append(processed.numpy())
+                    if isinstance(processed, torch.Tensor):
+                        processed_list.append(processed.numpy())
+                    else:
+                        processed_list.append(processed)
                 else:
                     processed = self.transform(img)
                     processed_list.append(processed)
             x["images"] = processed_list
         elif isinstance(images, np.ndarray):
             tensor = torch.from_numpy(images).float()
-            x["images"] = self.transform(tensor).numpy()
+            processed = self.transform(tensor)
+            if isinstance(processed, torch.Tensor):
+                x["images"] = processed.numpy()
+            else:
+                x["images"] = processed
         else:
             # Already a tensor
             x["images"] = self.transform(images)

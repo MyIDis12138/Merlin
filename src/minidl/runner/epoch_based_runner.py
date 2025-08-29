@@ -1,6 +1,7 @@
 import functools
 import time
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any, TypeVar
 
 import torch
@@ -181,6 +182,10 @@ class EpochBasedRunner(BaseRunner):
             outputs = model(inputs)
             loss = loss_fn(outputs, targets)
 
+            # Update accumulated metrics if available
+            if hasattr(self, "accumulated_metrics_calculator") and self.accumulated_metrics_calculator is not None:
+                self.accumulated_metrics_calculator.update(outputs, targets)
+
             metrics = {}
             if hasattr(self, "metrics_calculator"):
                 metrics = self.metrics_calculator.compute_metrics(outputs, targets)
@@ -216,7 +221,7 @@ class EpochBasedRunner(BaseRunner):
             self.logger.error("Cannot train epoch: train_dataloader is None")
             return {"loss": float("inf")}
 
-        pbar = tqdm(self.train_dataloader, desc=f"Epoch {self.current_epoch}/{self.max_epochs}")
+        pbar = tqdm(self.train_dataloader, desc=f"Epoch {self.current_epoch + 1}/{self.max_epochs}")
         for batch_idx, batch in enumerate(pbar):
             self.call_hooks("before_train_step")
             step_metrics = self.train_step(batch)
@@ -256,6 +261,10 @@ class EpochBasedRunner(BaseRunner):
             self.logger.error("Cannot validate epoch: val_dataloader is None")
             return {"loss": float("inf"), "accuracy": 0.0}
 
+        # Reset accumulated metrics at the start of epoch
+        if hasattr(self, "accumulated_metrics_calculator") and self.accumulated_metrics_calculator is not None:
+            self.accumulated_metrics_calculator.reset()
+
         pbar = tqdm(self.val_dataloader, desc="Validation")
         for batch_idx, batch in enumerate(pbar):
             self.call_hooks("before_val_step")
@@ -272,6 +281,13 @@ class EpochBasedRunner(BaseRunner):
         dataloader_len = len(self.val_dataloader)
         for k in epoch_metrics:
             epoch_metrics[k] /= float(dataloader_len)
+
+        # Compute accumulated metrics if available
+        if hasattr(self, "accumulated_metrics_calculator") and self.accumulated_metrics_calculator is not None:
+            accumulated_metrics = self.accumulated_metrics_calculator.compute_metrics()
+            # Add accumulated metrics with 'acc_' prefix to distinguish from averaged metrics
+            for metric_name, metric_value in accumulated_metrics.items():
+                epoch_metrics[f"acc_{metric_name}"] = metric_value
 
         self.val_metrics = epoch_metrics
         self.call_hooks("after_val_epoch")
@@ -295,6 +311,10 @@ class EpochBasedRunner(BaseRunner):
             self.logger.error("Cannot test epoch: test_dataloader is None")
             return {"loss": float("inf"), "accuracy": 0.0}
 
+        # Reset accumulated metrics at the start of epoch
+        if hasattr(self, "accumulated_metrics_calculator") and self.accumulated_metrics_calculator is not None:
+            self.accumulated_metrics_calculator.reset()
+
         pbar = tqdm(self.test_dataloader, desc="Testing")
         for batch_idx, batch in enumerate(pbar):
             self.call_hooks("before_test_step")
@@ -311,6 +331,13 @@ class EpochBasedRunner(BaseRunner):
         dataloader_len = len(self.test_dataloader)
         for k in epoch_metrics:
             epoch_metrics[k] /= float(dataloader_len)
+
+        # Compute accumulated metrics if available
+        if hasattr(self, "accumulated_metrics_calculator") and self.accumulated_metrics_calculator is not None:
+            accumulated_metrics = self.accumulated_metrics_calculator.compute_metrics()
+            # Add accumulated metrics with 'acc_' prefix to distinguish from averaged metrics
+            for metric_name, metric_value in accumulated_metrics.items():
+                epoch_metrics[f"acc_{metric_name}"] = metric_value
 
         self.test_metrics = epoch_metrics
         self.call_hooks("after_test_epoch")
@@ -329,6 +356,8 @@ class EpochBasedRunner(BaseRunner):
         start_time = time.time()
 
         self.call_hooks("before_train")
+        self.best_val_metric = float("inf")
+        self.best_model = None
 
         for epoch in range(self.current_epoch, self.max_epochs):
             self.current_epoch = epoch
@@ -338,6 +367,10 @@ class EpochBasedRunner(BaseRunner):
 
             if self.val_dataloader is not None:
                 val_metrics = self.val_epoch()
+                if val_metrics["loss"] < self.best_val_metric:
+                    self.best_val_metric = val_metrics["loss"]
+                    self.logger.info(f"New best validation metric: {self.best_val_metric}")
+                    self.best_model = deepcopy(self.model)
                 self.logger.info(f"Epoch {epoch}/{self.max_epochs}, Val metrics: {val_metrics}")
 
             if self.scheduler is not None:
@@ -358,6 +391,10 @@ class EpochBasedRunner(BaseRunner):
             self.logger.warning("No validation dataloader available")
             return {}
 
+        if self.best_model is not None:
+            self.logger.info("Loading best model state for validation")
+            self.model = deepcopy(self.best_model)
+
         self.logger.info("Starting validation")
         val_metrics = self.val_epoch()
 
@@ -372,6 +409,10 @@ class EpochBasedRunner(BaseRunner):
         if self.test_dataloader is None:
             self.logger.warning("No test dataloader available")
             return {}
+
+        if self.best_model is not None:
+            self.logger.info("Loading best model state for testing")
+            self.model = deepcopy(self.best_model)
 
         self.logger.info("Starting testing")
         test_metrics = self.test_epoch()
@@ -392,10 +433,12 @@ class MultimodalRunner(EpochBasedRunner):
         """
         super().__init__(config, device)
 
-        mm_config = config.get("multimodal", {})
+        mm_config = config.get("dataset", {})
 
-        self.input_keys = mm_config.get("input_keys", ["images", "clinical_features"])
+        self.required_phases = mm_config["params"].get("required_phases", [])
+        self.required_phases_len = len(self.required_phases) if self.required_phases else 3
         self.target_key = mm_config.get("target_key", "clinical_label")
+        self.logger.info(f"Training with phases: {self.required_phases}")
 
         runner_config = config.get("runner", {})
         transforms_config = runner_config.get("transforms", {})
@@ -404,8 +447,6 @@ class MultimodalRunner(EpochBasedRunner):
             if transform_configs:
                 transform = build_transform_pipeline(transform_configs)
                 self.__setattr__(f"{split}_transform", transform)
-
-        self.logger.info(f"Multimodal configuration: input_keys={self.input_keys}, target_key={self.target_key}")
 
     def apply_batch_transform(self, batch_data, transform_pipeline):
         """
@@ -417,7 +458,7 @@ class MultimodalRunner(EpochBasedRunner):
 
             transformed_images = []
             for i in range(batch_size):
-                sample = {"images": [batch_data["images"][i][j] for j in range(3)]}
+                sample = {"images": [batch_data["images"][i][j] for j in range(self.required_phases_len)]}
 
                 transformed = transform_pipeline(sample)
                 transformed_images.append(transformed["images"].squeeze(0))

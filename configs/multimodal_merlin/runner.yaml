@@ -1,0 +1,74 @@
+runner:
+  name: "epoch_based_multimodal_runner"
+  max_epochs: 10
+  transforms:
+    train:
+      - name: "ToTensor"
+        params:
+          device: "cuda"
+
+      - name: "RandomBiasField"
+        params:
+          prob: 0.5
+
+      - name: "RandomMotion"
+        params:
+          num_transforms: 3
+          prob: 0.5
+
+      - name: "RandomFlip"
+        params:
+          axes: 2
+          flip_probability: 0.5
+
+      - name: "RandomNoise"
+        params:
+          mean: 0
+          std: [0.1, 1.0]
+
+      - name: "Normalize"
+
+    val:
+      - name: "ToTensor"
+        params:
+          device: "cuda"
+
+      - name: "Normalize"
+
+    test:
+      - name: "ToTensor"
+        params:
+          device: "cuda"
+
+      - name: "Normalize"
+
+  hooks:
+    - name: "checkpoint_loader_hook"
+      params:
+        strict: true
+        enable: false
+
+    - name: "tensorboard_logger_hook"
+      params:
+        log_dir: "logs"
+        interval: 10
+
+    # - name: "checkpoint_saver_hook"
+    #   params:
+    #     interval: 1
+    #     max_keep_ckpts: 3
+    #     save_best: true
+
+    - name: "wandb_logger_hook"
+      params:
+        project: "Multi-modal for MRI"
+        tags: ["resnet3d_model", "focal_loss", "half_size"]
+        interval: 10
+        log_artifacts: True
+        log_grad_norm: True
+
+    # - name: "early_stopping_hook"
+    #   params:
+    #     patience: 5
+    #     min_delta: 0.05
+    #     rule: "less"
